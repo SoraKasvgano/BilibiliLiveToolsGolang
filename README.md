@@ -16,6 +16,7 @@ Go rewrite of BilibiliLiveTools (backend + frontend), focused on Bilibili live s
 ## 2. 当前主要能力
 
 - 推流输入：视频、USB 摄像头、RTSP、MJPEG、桌面、ONVIF（PTZ联动）。
+- 摄像头资产库：支持 RTSP/MJPEG/ONVIF/USB 统一管理，ONVIF 每台设备可独立用户名/密码（明文存储）。
 - Bilibili 能力：登录状态、二维码登录、Cookie 刷新、开播/关播、房间信息管理。
 - Bilibili 错误容错：重试、错误分级、完整响应落库、索引/详情查询。
 - 集成能力：Webhook / Bot 异步任务队列（持久化重试、死信、限流）、弹幕规则调度。
