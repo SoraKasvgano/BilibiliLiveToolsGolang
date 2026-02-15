@@ -4,7 +4,7 @@ Go rewrite of BilibiliLiveTools (backend + frontend), focused on Bilibili live s
 
 ## 1. 项目简介
 
-`gover` 是对原 C# 工具的 Go 重写版本，目标是：
+`BilibiliLiveToolsGover` 是对原 C# 工具[BilibiliLiveTools](https://github.com/withsalt/BilibiliLiveTools)的 Go 重写版本，目标是：
 
 - 尽量保持原功能 1:1 行为兼容；
 - 扩展 RTSP / MJPEG / ONVIF PTZ 场景；
