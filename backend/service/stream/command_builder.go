@@ -58,15 +58,22 @@ func buildAdvanceCommand(ctx BuildContext) (string, []string, error) {
 
 func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 	args := make([]string, 0, 64)
+	forceVideoTranscode := false
 	addOutput := func(hasAudio bool) {
 		codec := strings.TrimSpace(ctx.Setting.CustomVideoCodec)
 		if codec == "" {
 			codec = "libx264"
 		}
-		if ctx.Setting.OutputQuality == store.OutputQualityOriginal {
+		useCopy := ctx.Setting.OutputQuality == store.OutputQualityOriginal && !forceVideoTranscode
+		if useCopy {
 			args = append(args, "-c:v", "copy")
 		} else {
-			quality := qualityPreset(ctx.Setting.OutputQuality)
+			targetQuality := ctx.Setting.OutputQuality
+			if targetQuality == store.OutputQualityOriginal {
+				// MJPEG/USB/desktop/mosaic pipelines cannot stream-copy to FLV reliably.
+				targetQuality = store.OutputQualityHigh
+			}
+			quality := qualityPreset(targetQuality)
 			args = append(args,
 				"-vcodec", codec,
 				"-pix_fmt", "yuv420p",
@@ -80,7 +87,7 @@ func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 				"-tune", "zerolatency",
 			)
 		}
-		if strings.TrimSpace(ctx.Setting.OutputResolution) != "" {
+		if !useCopy && strings.TrimSpace(ctx.Setting.OutputResolution) != "" {
 			args = append(args, "-s", ctx.Setting.OutputResolution)
 		}
 		if strings.TrimSpace(ctx.Setting.CustomOutputParams) != "" {
@@ -97,6 +104,7 @@ func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 
 	hasAudio := false
 	if ctx.Setting.MultiInputEnabled && (len(ctx.Setting.MultiInputURLs) >= 2 || len(ctx.Setting.MultiInputMeta) >= 2) {
+		forceVideoTranscode = true
 		if err := appendMosaicInputArgs(ctx, &args, &hasAudio); err != nil {
 			return "", nil, err
 		}
@@ -124,6 +132,7 @@ func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 		}
 
 	case store.InputTypeUSBCamera, store.InputTypeCameraPlus:
+		forceVideoTranscode = true
 		deviceName := strings.TrimSpace(ctx.Setting.InputDeviceName)
 		if deviceName == "" {
 			return "", nil, errors.New("camera device is required")
@@ -156,6 +165,7 @@ func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 		}
 
 	case store.InputTypeDesktop:
+		forceVideoTranscode = true
 		if runtime.GOOS == "windows" {
 			args = append(args, "-f", "gdigrab", "-framerate", "30", "-i", "desktop")
 		} else {
@@ -189,6 +199,7 @@ func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 		}
 
 	case store.InputTypeMJPEG:
+		forceVideoTranscode = true
 		if strings.TrimSpace(ctx.Setting.MJPEGURL) == "" {
 			return "", nil, errors.New("mjpeg url is required")
 		}

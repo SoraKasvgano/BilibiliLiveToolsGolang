@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -105,6 +106,9 @@ func (s *Store) UpdatePushSetting(ctx context.Context, req PushSettingUpdateRequ
 		}
 		if !strings.Contains(req.FFmpegCommand, "{URL}") {
 			return nil, errors.New("ffmpeg command must include {URL}")
+		}
+		if isLikelyUSBTemplateCommand(req.FFmpegCommand) && (inputType == InputTypeRTSP || inputType == InputTypeMJPEG || inputType == InputTypeONVIF) {
+			return nil, errors.New("advanced ffmpeg command looks like USB camera template; switch to normal mode or replace command for current input type")
 		}
 	}
 	if req.OutputResolution == "" {
@@ -209,9 +213,9 @@ func (s *Store) UpdatePushSetting(ctx context.Context, req PushSettingUpdateRequ
 		req.InputDeviceResolution,
 		req.InputDeviceFramerate,
 		req.InputDevicePlugins,
-		strings.TrimSpace(req.RTSPURL),
-		strings.TrimSpace(req.MJPEGURL),
-		strings.TrimSpace(req.ONVIFEndpoint),
+		normalizeInputURL(req.RTSPURL),
+		normalizeInputURL(req.MJPEGURL),
+		normalizeInputURL(req.ONVIFEndpoint),
 		strings.TrimSpace(req.ONVIFUsername),
 		strings.TrimSpace(req.ONVIFPassword),
 		strings.TrimSpace(req.ONVIFProfileToken),
@@ -1573,9 +1577,9 @@ func sanitizeCameraSourceForWrite(req CameraSourceSaveRequest) (*CameraSource, e
 	item := &CameraSource{
 		Name:                strings.TrimSpace(req.Name),
 		SourceType:          sourceType,
-		RTSPURL:             strings.TrimSpace(req.RTSPURL),
-		MJPEGURL:            strings.TrimSpace(req.MJPEGURL),
-		ONVIFEndpoint:       strings.TrimSpace(req.ONVIFEndpoint),
+		RTSPURL:             normalizeInputURL(req.RTSPURL),
+		MJPEGURL:            normalizeInputURL(req.MJPEGURL),
+		ONVIFEndpoint:       normalizeInputURL(req.ONVIFEndpoint),
 		ONVIFUsername:       strings.TrimSpace(req.ONVIFUsername),
 		ONVIFPassword:       strings.TrimSpace(req.ONVIFPassword),
 		ONVIFProfileToken:   strings.TrimSpace(req.ONVIFProfileToken),
@@ -1650,6 +1654,24 @@ func dedupPositiveIDs(ids []int64) []int64 {
 	}
 	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 	return keys
+}
+
+func normalizeInputURL(raw string) string {
+	return strings.TrimSpace(html.UnescapeString(strings.TrimSpace(raw)))
+}
+
+func isLikelyUSBTemplateCommand(command string) bool {
+	lower := strings.ToLower(strings.TrimSpace(command))
+	if lower == "" {
+		return false
+	}
+	if strings.Contains(lower, "-f dshow") || strings.Contains(lower, "video=\"") {
+		return true
+	}
+	if strings.Contains(lower, "-f v4l2") || strings.Contains(lower, "/dev/video") {
+		return true
+	}
+	return false
 }
 
 func (s *Store) EnsureMaterialFile(path string) error {

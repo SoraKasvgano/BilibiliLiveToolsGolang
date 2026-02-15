@@ -82,6 +82,12 @@ go run .
 
 程序启动时会自动加载配置文件；若不存在会自动创建（UTF-8 JSON）。
 
+调试日志开关：
+
+- `debugMode`（推荐）或 `enableDebugLogs` 设为 `true` 时，
+  会将详细运行日志写入 `data/log/gover-YYYYMMDD.log`（含 ffmpeg 关键日志）。
+- 两个字段会自动同步，支持热加载，无需重启。
+
 默认配置路径：
 
 - `./data/config.json`（常规）

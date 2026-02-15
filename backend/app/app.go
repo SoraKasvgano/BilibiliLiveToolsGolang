@@ -16,6 +16,7 @@ import (
 
 	_ "bilibililivetools/gover/backend/api/handlers"
 	"bilibililivetools/gover/backend/config"
+	"bilibililivetools/gover/backend/logging"
 	"bilibililivetools/gover/backend/router"
 	"bilibililivetools/gover/backend/service/bilibili"
 	ffsvc "bilibililivetools/gover/backend/service/ffmpeg"
@@ -41,6 +42,7 @@ type App struct {
 	apiHandler  http.Handler
 	routes      []router.Route
 	openapiJSON []byte
+	logger      *logging.Manager
 }
 
 func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
@@ -61,9 +63,14 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 	maintenanceSvc := maintenance.New(storeDB)
 	monitorSvc := monitor.New(storeDB, cfg.LogBufferSize)
 	onvifSvc := onvif.New()
-	streamMgr := stream.NewManager(storeDB, ffmpegSvc, bilibiliSvc, cfg.MediaDir, cfg.LogBufferSize)
+	streamMgr := stream.NewManager(storeDB, ffmpegSvc, bilibiliSvc, cfg.MediaDir, cfg.LogBufferSize, cfg.EnableDebugLogs || cfg.DebugMode)
 	telemetrySvc := telemetry.New(storeDB, bilibiliSvc, streamMgr.Status)
 	integrationSvc := integration.New(storeDB, streamMgr, bilibiliSvc, onvifSvc)
+	loggerMgr, err := logging.New(cfg)
+	if err != nil {
+		storeDB.Close()
+		return nil, err
+	}
 
 	deps := &router.Dependencies{
 		Config:      cfg,
@@ -81,12 +88,14 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 	apiHandler, routes := router.Build(deps)
 	openapi, err := buildOpenAPISpec(routes)
 	if err != nil {
+		_ = loggerMgr.Close()
 		storeDB.Close()
 		return nil, err
 	}
 
 	frontendSub, err := fs.Sub(embeddedFrontend, "frontend")
 	if err != nil {
+		_ = loggerMgr.Close()
 		storeDB.Close()
 		return nil, fmt.Errorf("resolve embedded frontend failed: %w", err)
 	}
@@ -103,11 +112,16 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 		apiHandler:  apiHandler,
 		routes:      routes,
 		openapiJSON: openapi,
+		logger:      loggerMgr,
 	}
 	cfgManager.AddListener(func(newCfg config.Config) {
 		log.Printf("[config] hot reload applied from %s", newCfg.ConfigFile)
 		ffmpegSvc.UpdatePaths(newCfg.FFmpegPath, newCfg.FFprobePath)
 		bilibiliSvc.UpdateConfig(newCfg)
+		streamMgr.UpdateDebug(newCfg.EnableDebugLogs || newCfg.DebugMode)
+		if err := loggerMgr.Update(newCfg); err != nil {
+			log.Printf("[config][warn] update logger failed: %v", err)
+		}
 	})
 	app.server = &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -248,6 +262,9 @@ func (a *App) Shutdown(ctx context.Context) error {
 	_ = a.stream.Stop(ctx)
 	shutdownErr := a.server.Shutdown(ctx)
 	closeErr := a.store.Close()
+	if a.logger != nil {
+		_ = a.logger.Close()
+	}
 	if shutdownErr != nil {
 		return shutdownErr
 	}

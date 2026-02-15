@@ -129,6 +129,10 @@ func decodeConfigPatch(r *http.Request, base config.Config) (config.Config, erro
 	if value, ok := getBool(req, "enableDebugLogs"); ok {
 		base.EnableDebugLogs = value
 	}
+	if value, ok := getBool(req, "debugMode"); ok {
+		base.DebugMode = value
+		base.EnableDebugLogs = value
+	}
 	if value, ok := getString(req, "biliAppKey"); ok {
 		base.BiliAppKey = value
 	}
@@ -163,15 +167,13 @@ func restartRequiredChangedFields(oldCfg config.Config, newCfg config.Config) []
 	if oldCfg.LogBufferSize != newCfg.LogBufferSize {
 		result = append(result, "logBufferSize")
 	}
-	if oldCfg.EnableDebugLogs != newCfg.EnableDebugLogs {
-		result = append(result, "enableDebugLogs")
-	}
 	return result
 }
 
 func runtimeHotReloadNotes() []string {
 	return []string{
 		"Dynamic hot reload now applies to ffmpegPath/ffprobePath and Bilibili API credentials/metadata.",
+		"debugMode/enableDebugLogs now hot apply to data/log file logging and ffmpeg verbose mirror.",
 		"All other fields are persisted, but restart is required before they fully apply.",
 	}
 }

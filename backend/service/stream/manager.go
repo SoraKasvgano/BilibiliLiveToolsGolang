@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os/exec"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ type Manager struct {
 	mediaDir  string
 	status    store.PushStatus
 	logBuffer int
+	debugLogs bool
 
 	mu      sync.RWMutex
 	cancel  context.CancelFunc
@@ -31,7 +33,7 @@ type Manager struct {
 	logs    []store.FFmpegLogItem
 }
 
-func NewManager(storeDB *store.Store, ff *ffsvc.Service, bili bilibili.Service, mediaDir string, logBuffer int) *Manager {
+func NewManager(storeDB *store.Store, ff *ffsvc.Service, bili bilibili.Service, mediaDir string, logBuffer int, debugLogs bool) *Manager {
 	if logBuffer <= 0 {
 		logBuffer = 300
 	}
@@ -42,8 +44,15 @@ func NewManager(storeDB *store.Store, ff *ffsvc.Service, bili bilibili.Service, 
 		mediaDir:  mediaDir,
 		status:    store.PushStatusStopped,
 		logBuffer: logBuffer,
+		debugLogs: debugLogs,
 		logs:      make([]store.FFmpegLogItem, 0, logBuffer),
 	}
+}
+
+func (m *Manager) UpdateDebug(enabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.debugLogs = enabled
 }
 
 func (m *Manager) Start(ctx context.Context, startup bool) error {
@@ -280,6 +289,9 @@ func (m *Manager) addLog(logType string, message string) {
 	m.logs = append([]store.FFmpegLogItem{entry}, m.logs...)
 	if len(m.logs) > m.logBuffer {
 		m.logs = m.logs[:m.logBuffer]
+	}
+	if m.debugLogs {
+		log.Printf("[ffmpeg][%s] %s", strings.ToLower(strings.TrimSpace(logType)), message)
 	}
 }
 

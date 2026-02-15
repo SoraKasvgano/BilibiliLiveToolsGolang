@@ -19,6 +19,7 @@ type Config struct {
 	LogBufferSize   int    `json:"logBufferSize"`
 	APIBase         string `json:"apiBase"`
 	AllowOrigin     string `json:"allowOrigin"`
+	DebugMode       bool   `json:"debugMode"`
 	EnableDebugLogs bool   `json:"enableDebugLogs"`
 	BiliAppKey      string `json:"biliAppKey"`
 	BiliAppSecret   string `json:"biliAppSecret"`
@@ -200,6 +201,7 @@ func defaultConfig(configFile string) Config {
 		LogBufferSize:   envIntOrDefault("GOVER_LOG_BUFFER_SIZE", 300),
 		APIBase:         envOrDefault("GOVER_API_BASE", "/api/v1"),
 		AllowOrigin:     envOrDefault("GOVER_ALLOW_ORIGIN", "*"),
+		DebugMode:       strings.EqualFold(envOrDefault("GOVER_DEBUG", "false"), "true"),
 		EnableDebugLogs: strings.EqualFold(envOrDefault("GOVER_DEBUG", "false"), "true"),
 		BiliAppKey:      envOrDefault("GOVER_BILI_APP_KEY", "aae92bc66f3edfab"),
 		BiliAppSecret:   envOrDefault("GOVER_BILI_APP_SECRET", "af125a0d5279fd576c1b4418a3e8276d"),
@@ -242,6 +244,10 @@ func normalizeConfig(cfg Config, configFile string) Config {
 	if strings.TrimSpace(cfg.AllowOrigin) == "" {
 		cfg.AllowOrigin = "*"
 	}
+	if cfg.DebugMode {
+		cfg.EnableDebugLogs = true
+	}
+	cfg.DebugMode = cfg.EnableDebugLogs
 	if strings.TrimSpace(cfg.BiliPlatform) == "" {
 		cfg.BiliPlatform = "pc_link"
 	}
