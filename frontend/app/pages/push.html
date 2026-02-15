@@ -117,6 +117,10 @@
       <label>高级模式 FFmpeg 命令（必须包含 {URL}）
         <textarea id="ffmpegCommand" rows="3" placeholder="ffmpeg ... -f flv {URL}"></textarea>
       </label>
+      <div class="actions">
+        <button id="btnFillAdvancedCmd">按输入类型填充推荐命令</button>
+      </div>
+      <p class="soft-note">提示：高级模式命令是“手动托管”，切换输入源不会自动强改你已编辑的命令；可点击上方按钮快速生成模板。</p>
     </section>
 
     <section class="page-card">
@@ -159,6 +163,42 @@
       document.getElementById("panelMJPEG").style.display = inputType === "mjpeg" ? "" : "none";
       document.getElementById("panelONVIF").style.display = inputType === "onvif" ? "" : "none";
       document.getElementById("panelUSB").style.display = inputType === "usb_camera" || inputType === "usb_camera_plus" ? "" : "none";
+    }
+
+    function isUsbTemplateCommand(commandText) {
+      const lower = String(commandText || "").toLowerCase();
+      return lower.includes("-f dshow") || lower.includes("video=\"") || lower.includes("-f v4l2") || lower.includes("/dev/video");
+    }
+
+    function recommendedAdvancedCommand(inputType) {
+      const type = String(inputType || "").toLowerCase();
+      const commonOut = "-vcodec libx264 -pix_fmt yuv420p -r 25 -g 50 -b:v 3500k -maxrate 3500k -bufsize 7000k -preset veryfast -tune zerolatency -f flv {URL}";
+      if (type === "rtsp" || type === "onvif") {
+        return `ffmpeg -rtsp_transport tcp -i \"${type === "onvif" ? "rtsp://user:pass@ip/stream" : "rtsp://user:pass@ip/stream"}\" -an ${commonOut}`;
+      }
+      if (type === "mjpeg") {
+        return "ffmpeg -f mjpeg -i \"http://ip:port/mjpeg\" -an " + commonOut;
+      }
+      if (type === "usb_camera" || type === "usb_camera_plus") {
+        return "ffmpeg -f dshow -video_size 1280x720 -framerate 30 -i video=\"HD Pro Webcam C920\" -an " + commonOut;
+      }
+      return "ffmpeg -re -i \"input.mp4\" -an " + commonOut;
+    }
+
+    function autoSuggestAdvancedCommand() {
+      const model = asNumber("model", 1);
+      if (model !== 2) return;
+      const inputType = asText("inputType");
+      const commandEl = document.getElementById("ffmpegCommand");
+      const current = commandEl.value || "";
+      if (!current.trim()) {
+        commandEl.value = recommendedAdvancedCommand(inputType);
+        return;
+      }
+      const networkType = inputType === "rtsp" || inputType === "mjpeg" || inputType === "onvif";
+      if (networkType && isUsbTemplateCommand(current)) {
+        commandEl.value = recommendedAdvancedCommand(inputType);
+      }
     }
 
     function cameraTypeLabel(type) {
@@ -259,6 +299,7 @@
       document.getElementById("usbResolution").value = data.inputDeviceResolution || "1280x720";
       document.getElementById("usbFramerate").value = String(data.inputDeviceFramerate || 30);
       switchInputPanels();
+      autoSuggestAdvancedCommand();
     }
 
     async function loadSetting() {
@@ -302,7 +343,11 @@
       showJSON("box", result);
     }
 
-    document.getElementById("inputType").onchange = switchInputPanels;
+    document.getElementById("inputType").onchange = () => {
+      switchInputPanels();
+      autoSuggestAdvancedCommand();
+    };
+    document.getElementById("model").onchange = autoSuggestAdvancedCommand;
     document.getElementById("cameraFilterType").onchange = () => loadCameras().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
 
     bindAction("load", loadSetting, "box");
@@ -315,6 +360,10 @@
     bindAction("btnApplyCamera", applySelectedCamera, "box");
     bindAction("btnOpenCameraPage", async () => {
       window.location.href = "/app/pages/cameras.html";
+    }, "box");
+    bindAction("btnFillAdvancedCmd", async () => {
+      document.getElementById("ffmpegCommand").value = recommendedAdvancedCommand(asText("inputType"));
+      showJSON("box", { code: 0, message: "已按当前输入类型填充推荐高级命令" });
     }, "box");
 
     switchInputPanels();

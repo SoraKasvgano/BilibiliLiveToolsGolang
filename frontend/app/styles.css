@@ -205,6 +205,12 @@ pre {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.muted {
+  margin: 6px 0 2px;
+  font-size: 13px;
+  color: #64748b;
+}
+
 @media (max-width: 900px) {
   .grid.two {
     grid-template-columns: 1fr;

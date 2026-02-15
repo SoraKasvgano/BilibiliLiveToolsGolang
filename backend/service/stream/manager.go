@@ -2,6 +2,7 @@ package stream
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -222,6 +223,8 @@ func (m *Manager) runOnce(ctx context.Context) error {
 
 func (m *Manager) collectPipe(level string, reader io.Reader) {
 	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 128*1024), 4*1024*1024)
+	scanner.Split(splitByCRLF)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -229,6 +232,25 @@ func (m *Manager) collectPipe(level string, reader io.Reader) {
 		}
 		m.addLog(level, line)
 	}
+	if err := scanner.Err(); err != nil {
+		m.addLog("Error", "ffmpeg log scanner error: "+err.Error())
+	}
+}
+
+func splitByCRLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if len(data) == 0 {
+		if atEOF {
+			return 0, nil, nil
+		}
+		return 0, nil, nil
+	}
+	if idx := bytes.IndexAny(data, "\r\n"); idx >= 0 {
+		return idx + 1, bytes.TrimSpace(data[:idx]), nil
+	}
+	if atEOF {
+		return len(data), bytes.TrimSpace(data), nil
+	}
+	return 0, nil, nil
 }
 
 func (m *Manager) Stop(ctx context.Context) error {

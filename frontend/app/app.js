@@ -53,6 +53,43 @@ function asString(id) {
   return (el.value || "").trim();
 }
 
+function isUsbTemplateCommand(commandText) {
+  const lower = String(commandText || "").toLowerCase();
+  return lower.includes("-f dshow") || lower.includes("video=\"") || lower.includes("-f v4l2") || lower.includes("/dev/video");
+}
+
+function recommendedAdvancedCommand(inputType) {
+  const type = String(inputType || "").toLowerCase();
+  const commonOut = "-vcodec libx264 -pix_fmt yuv420p -r 25 -g 50 -b:v 3500k -maxrate 3500k -bufsize 7000k -preset veryfast -tune zerolatency -f flv {URL}";
+  if (type === "rtsp" || type === "onvif") {
+    return "ffmpeg -rtsp_transport tcp -i \"rtsp://user:pass@ip/stream\" -an " + commonOut;
+  }
+  if (type === "mjpeg") {
+    return "ffmpeg -f mjpeg -i \"http://ip:port/mjpeg\" -an " + commonOut;
+  }
+  if (type === "usb_camera" || type === "usb_camera_plus") {
+    return "ffmpeg -f dshow -video_size 1280x720 -framerate 30 -i video=\"HD Pro Webcam C920\" -an " + commonOut;
+  }
+  return "ffmpeg -re -i \"input.mp4\" -an " + commonOut;
+}
+
+function suggestPushAdvancedCommand() {
+  const model = asNumber("pushModel", 1);
+  if (model !== 2) return;
+  const inputType = asString("pushInputType");
+  const commandEl = document.getElementById("pushCommand");
+  if (!commandEl) return;
+  const current = commandEl.value || "";
+  if (!current.trim()) {
+    commandEl.value = recommendedAdvancedCommand(inputType);
+    return;
+  }
+  const networkType = inputType === "rtsp" || inputType === "mjpeg" || inputType === "onvif";
+  if (networkType && isUsbTemplateCommand(current)) {
+    commandEl.value = recommendedAdvancedCommand(inputType);
+  }
+}
+
 function withError(boxId, fn) {
   return async () => {
     try {
@@ -477,6 +514,7 @@ async function refreshPush() {
   document.getElementById("ptzUsername").value = data.onvifUsername || "";
   document.getElementById("ptzPassword").value = data.onvifPassword || "";
   document.getElementById("ptzProfileToken").value = data.onvifProfileToken || "";
+  suggestPushAdvancedCommand();
 }
 
 async function refreshMaterials() {
@@ -963,6 +1001,12 @@ function bindActions() {
     const result = await apiGet("/api/v1/push/status");
     setBox("pushBox", result);
   });
+  document.getElementById("btnFillPushCommand").onclick = withError("pushBox", async () => {
+    document.getElementById("pushCommand").value = recommendedAdvancedCommand(asString("pushInputType"));
+    setBox("pushBox", { code: 0, message: "已按当前输入类型填充推荐高级命令" });
+  });
+  document.getElementById("pushInputType").addEventListener("change", suggestPushAdvancedCommand);
+  document.getElementById("pushModel").addEventListener("change", suggestPushAdvancedCommand);
   document.getElementById("btnAddMosaicSource").onclick = withError("mosaicPreviewBox", async () => {
     const url = asString("mosaicNewSourceUrl");
     if (!url) throw new Error("请输入拼屏源地址");

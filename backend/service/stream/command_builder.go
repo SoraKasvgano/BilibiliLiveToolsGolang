@@ -71,7 +71,7 @@ func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 			targetQuality := ctx.Setting.OutputQuality
 			if targetQuality == store.OutputQualityOriginal {
 				// MJPEG/USB/desktop/mosaic pipelines cannot stream-copy to FLV reliably.
-				targetQuality = store.OutputQualityHigh
+				targetQuality = store.OutputQualityMedium
 			}
 			quality := qualityPreset(targetQuality)
 			args = append(args,

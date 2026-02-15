@@ -216,6 +216,10 @@
       <label>高级模式 FFmpeg 命令（必须含 {URL}）
         <textarea id="pushCommand" rows="3" placeholder="ffmpeg ... -f flv {URL}"></textarea>
       </label>
+      <div class="actions">
+        <button id="btnFillPushCommand">按输入类型填充推荐高级命令</button>
+      </div>
+      <p class="muted">高级模式命令属于手动托管；切换输入类型后可点击该按钮快速切换模板。</p>
       <div class="grid two">
         <label>自动重试
           <select id="pushAutoRetry">
