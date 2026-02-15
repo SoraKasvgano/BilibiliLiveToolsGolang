@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Push 页面（迁移版）</title>
+  <title>推流配置</title>
   <link rel="stylesheet" href="/app/pages/shared.css" />
 </head>
 <body>
@@ -12,13 +12,43 @@
   </header>
   <main class="page-shell">
     <section class="page-card">
-      <h1>Push 页面（迁移版）</h1>
+      <h1>推流配置</h1>
+      <p class="soft-note">推荐流程：先在摄像头管理页保存设备，然后在这里一键套用，减少手动输入错误。</p>
       <div id="roleTip" class="role-tip"></div>
+    </section>
+
+    <section class="page-card">
+      <h2>快速套用（来自摄像头库）</h2>
+      <div class="grid two">
+        <label>类型筛选
+          <select id="cameraFilterType">
+            <option value="">全部</option>
+            <option value="rtsp">RTSP</option>
+            <option value="mjpeg">MJPEG</option>
+            <option value="onvif">ONVIF</option>
+            <option value="usb">USB</option>
+          </select>
+        </label>
+        <label>选择摄像头
+          <select id="cameraSelect">
+            <option value="">（请先刷新列表）</option>
+          </select>
+        </label>
+      </div>
+      <div class="actions">
+        <button id="btnLoadCameras">刷新摄像头列表</button>
+        <button id="btnApplyCamera">一键套用并保存</button>
+        <button id="btnOpenCameraPage">打开摄像头管理页</button>
+      </div>
+    </section>
+
+    <section class="page-card">
+      <h2>基础推流参数</h2>
       <div class="grid two">
         <label>模式
           <select id="model">
-            <option value="1">Normal</option>
-            <option value="2">Advance</option>
+            <option value="1">普通模式</option>
+            <option value="2">高级模式</option>
           </select>
         </label>
         <label>输入类型
@@ -44,9 +74,53 @@
         </label>
       </div>
       <div class="grid two">
-        <label>RTSP URL<input id="rtspUrl" /></label>
-        <label>MJPEG URL<input id="mjpegUrl" /></label>
+        <label>自动重试
+          <select id="autoRetry">
+            <option value="true" selected>开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </label>
+        <label>重试间隔（秒）<input id="retryInterval" type="number" value="30" /></label>
       </div>
+    </section>
+
+    <section class="page-card">
+      <h2>输入源详情</h2>
+      <div id="panelRTSP" class="soft-panel">
+        <h3>RTSP</h3>
+        <label>RTSP URL<input id="rtspUrl" placeholder="rtsp://user:pass@ip/stream" /></label>
+      </div>
+      <div id="panelMJPEG" class="soft-panel">
+        <h3>MJPEG</h3>
+        <label>MJPEG URL<input id="mjpegUrl" placeholder="http://ip:port/mjpeg" /></label>
+      </div>
+      <div id="panelONVIF" class="soft-panel">
+        <h3>ONVIF（明文用户名/密码）</h3>
+        <div class="grid two">
+          <label>Endpoint<input id="onvifEndpoint" placeholder="http://ip/onvif/device_service" /></label>
+          <label>ProfileToken<input id="onvifProfileToken" placeholder="可选" /></label>
+        </div>
+        <div class="grid two">
+          <label>用户名<input id="onvifUsername" placeholder="admin" /></label>
+          <label>密码<input id="onvifPassword" type="text" placeholder="123456" /></label>
+        </div>
+        <label>绑定 RTSP URL<input id="onvifRtspUrl" placeholder="rtsp://user:pass@ip/stream" /></label>
+      </div>
+      <div id="panelUSB" class="soft-panel">
+        <h3>USB 摄像头</h3>
+        <div class="grid two">
+          <label>设备名称<input id="usbName" placeholder="HD Pro Webcam C920 或 /dev/video0" /></label>
+          <label>分辨率<input id="usbResolution" value="1280x720" /></label>
+        </div>
+        <label>帧率（fps）<input id="usbFramerate" type="number" value="30" /></label>
+      </div>
+      <label>高级模式 FFmpeg 命令（必须包含 {URL}）
+        <textarea id="ffmpegCommand" rows="3" placeholder="ffmpeg ... -f flv {URL}"></textarea>
+      </label>
+    </section>
+
+    <section class="page-card">
+      <h2>执行操作</h2>
       <div class="actions">
         <button id="load">读取配置</button>
         <button id="save" data-perm="operator,admin">保存配置</button>
@@ -64,34 +138,172 @@
     const { initPage, requestJSON, showJSON, bindAction } = window.GoverShared;
     initPage({ active: "push" });
 
+    const cameraMap = new Map();
+
+    function asText(id) {
+      return String(document.getElementById(id).value || "").trim();
+    }
+
+    function asNumber(id, fallback) {
+      const value = Number(document.getElementById(id).value || 0);
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    function asBool(id) {
+      return String(document.getElementById(id).value || "").toLowerCase() === "true";
+    }
+
+    function switchInputPanels() {
+      const inputType = asText("inputType");
+      document.getElementById("panelRTSP").style.display = inputType === "rtsp" ? "" : "none";
+      document.getElementById("panelMJPEG").style.display = inputType === "mjpeg" ? "" : "none";
+      document.getElementById("panelONVIF").style.display = inputType === "onvif" ? "" : "none";
+      document.getElementById("panelUSB").style.display = inputType === "usb_camera" || inputType === "usb_camera_plus" ? "" : "none";
+    }
+
+    function cameraTypeLabel(type) {
+      const value = String(type || "").toLowerCase();
+      if (value === "rtsp") return "RTSP";
+      if (value === "mjpeg") return "MJPEG";
+      if (value === "onvif") return "ONVIF";
+      if (value === "usb") return "USB";
+      return value || "unknown";
+    }
+
+    function cameraHint(item) {
+      if (!item) return "";
+      const type = String(item.sourceType || "").toLowerCase();
+      if (type === "rtsp" || type === "onvif") return item.rtspUrl || item.onvifEndpoint || "";
+      if (type === "mjpeg") return item.mjpegUrl || "";
+      if (type === "usb") return item.usbDeviceName || "";
+      return "";
+    }
+
+    function fillByCamera(item) {
+      if (!item) return;
+      const type = String(item.sourceType || "").toLowerCase();
+      if (type === "rtsp") {
+        document.getElementById("inputType").value = "rtsp";
+        document.getElementById("rtspUrl").value = item.rtspUrl || "";
+      } else if (type === "mjpeg") {
+        document.getElementById("inputType").value = "mjpeg";
+        document.getElementById("mjpegUrl").value = item.mjpegUrl || "";
+      } else if (type === "onvif") {
+        document.getElementById("inputType").value = "onvif";
+        document.getElementById("onvifEndpoint").value = item.onvifEndpoint || "";
+        document.getElementById("onvifUsername").value = item.onvifUsername || "";
+        document.getElementById("onvifPassword").value = item.onvifPassword || "";
+        document.getElementById("onvifProfileToken").value = item.onvifProfileToken || "";
+        document.getElementById("onvifRtspUrl").value = item.rtspUrl || "";
+      } else if (type === "usb") {
+        document.getElementById("inputType").value = "usb_camera";
+        document.getElementById("usbName").value = item.usbDeviceName || "";
+        document.getElementById("usbResolution").value = item.usbDeviceResolution || "1280x720";
+        document.getElementById("usbFramerate").value = String(item.usbDeviceFramerate || 30);
+      }
+      switchInputPanels();
+    }
+
+    async function loadCameras() {
+      const params = new URLSearchParams();
+      params.set("page", "1");
+      params.set("limit", "200");
+      const filterType = asText("cameraFilterType");
+      if (filterType) params.set("sourceType", filterType);
+      const result = await requestJSON(`/api/v1/cameras?${params.toString()}`);
+      showJSON("box", result);
+      const select = document.getElementById("cameraSelect");
+      select.innerHTML = '<option value="">（请选择已保存摄像头）</option>';
+      cameraMap.clear();
+      const items = ((result || {}).data || {}).data || [];
+      for (const item of items) {
+        cameraMap.set(item.id, item);
+        const option = document.createElement("option");
+        option.value = String(item.id);
+        option.textContent = `${item.name || `Camera-${item.id}`} [${cameraTypeLabel(item.sourceType)}] ${cameraHint(item)}`;
+        select.appendChild(option);
+      }
+    }
+
+    async function applySelectedCamera() {
+      const id = Number(document.getElementById("cameraSelect").value || 0);
+      if (!id) throw new Error("请先选择摄像头");
+      const result = await requestJSON(`/api/v1/cameras/${id}/apply-push`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}"
+      });
+      showJSON("box", result);
+      if (result && result.data && result.data.pushSetting) {
+        fillSetting(result.data.pushSetting);
+      }
+    }
+
+    function fillSetting(item) {
+      const data = item || {};
+      document.getElementById("model").value = String(data.model || 1);
+      document.getElementById("inputType").value = data.inputType || "video";
+      document.getElementById("resolution").value = data.outputResolution || "1280x720";
+      document.getElementById("quality").value = String(data.outputQuality || 2);
+      document.getElementById("autoRetry").value = data.isAutoRetry ? "true" : "false";
+      document.getElementById("retryInterval").value = String(data.retryInterval || 30);
+      document.getElementById("ffmpegCommand").value = data.ffmpegCommand || "";
+      document.getElementById("rtspUrl").value = data.rtspUrl || "";
+      document.getElementById("mjpegUrl").value = data.mjpegUrl || "";
+      document.getElementById("onvifEndpoint").value = data.onvifEndpoint || "";
+      document.getElementById("onvifUsername").value = data.onvifUsername || "";
+      document.getElementById("onvifPassword").value = data.onvifPassword || "";
+      document.getElementById("onvifProfileToken").value = data.onvifProfileToken || "";
+      document.getElementById("onvifRtspUrl").value = data.rtspUrl || "";
+      document.getElementById("usbName").value = data.inputDeviceName || "";
+      document.getElementById("usbResolution").value = data.inputDeviceResolution || "1280x720";
+      document.getElementById("usbFramerate").value = String(data.inputDeviceFramerate || 30);
+      switchInputPanels();
+    }
+
     async function loadSetting() {
-      const data = await requestJSON("/api/v1/push/setting");
-      const item = data.data || {};
-      document.getElementById("model").value = String(item.model || 1);
-      document.getElementById("inputType").value = item.inputType || "video";
-      document.getElementById("resolution").value = item.outputResolution || "1280x720";
-      document.getElementById("quality").value = String(item.outputQuality || 2);
-      document.getElementById("rtspUrl").value = item.rtspUrl || "";
-      document.getElementById("mjpegUrl").value = item.mjpegUrl || "";
-      showJSON("box", data);
+      const result = await requestJSON("/api/v1/push/setting");
+      fillSetting(result.data || {});
+      showJSON("box", result);
+    }
+
+    function buildPayload() {
+      const inputType = asText("inputType") || "video";
+      const payload = {
+        model: asNumber("model", 1),
+        inputType,
+        outputResolution: asText("resolution") || "1280x720",
+        outputQuality: asNumber("quality", 2),
+        isAutoRetry: asBool("autoRetry"),
+        retryInterval: asNumber("retryInterval", 30),
+        ffmpegCommand: document.getElementById("ffmpegCommand").value || "",
+        rtspUrl: asText("rtspUrl"),
+        mjpegUrl: asText("mjpegUrl"),
+        onvifEndpoint: asText("onvifEndpoint"),
+        onvifUsername: asText("onvifUsername"),
+        onvifPassword: document.getElementById("onvifPassword").value || "",
+        onvifProfileToken: asText("onvifProfileToken"),
+        inputDeviceName: asText("usbName"),
+        inputDeviceResolution: asText("usbResolution"),
+        inputDeviceFramerate: asNumber("usbFramerate", 30)
+      };
+      if (inputType === "onvif") {
+        payload.rtspUrl = asText("onvifRtspUrl");
+      }
+      return payload;
     }
 
     async function saveSetting() {
-      const payload = {
-        model: Number(document.getElementById("model").value || 1),
-        inputType: document.getElementById("inputType").value || "video",
-        outputResolution: document.getElementById("resolution").value || "1280x720",
-        outputQuality: Number(document.getElementById("quality").value || 2),
-        rtspUrl: document.getElementById("rtspUrl").value || "",
-        mjpegUrl: document.getElementById("mjpegUrl").value || ""
-      };
       const result = await requestJSON("/api/v1/push/setting", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(buildPayload())
       });
       showJSON("box", result);
     }
+
+    document.getElementById("inputType").onchange = switchInputPanels;
+    document.getElementById("cameraFilterType").onchange = () => loadCameras().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
 
     bindAction("load", loadSetting, "box");
     bindAction("save", saveSetting, "box");
@@ -99,8 +311,15 @@
     bindAction("stop", async () => showJSON("box", await requestJSON("/api/v1/push/stop", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })), "box");
     bindAction("restart", async () => showJSON("box", await requestJSON("/api/v1/push/restart", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })), "box");
     bindAction("status", async () => showJSON("box", await requestJSON("/api/v1/push/status")), "box");
+    bindAction("btnLoadCameras", loadCameras, "box");
+    bindAction("btnApplyCamera", applySelectedCamera, "box");
+    bindAction("btnOpenCameraPage", async () => {
+      window.location.href = "/app/pages/cameras.html";
+    }, "box");
 
+    switchInputPanels();
     loadSetting().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
+    loadCameras().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
   </script>
 </body>
 </html>

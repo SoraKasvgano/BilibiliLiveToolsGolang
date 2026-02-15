@@ -69,6 +69,8 @@ let mosaicDragIndex = -1;
 let latestMaintenanceStatus = null;
 let latestIntegrationFeatures = null;
 let latestAdvancedStats = null;
+let accountStatusTicker = null;
+let qrLoginPopup = null;
 const ADVANCED_EXPORT_PRESETS = {
   all: "all",
   basic: "totals,hourlyEvents,hourlyDanmaku,eventTypeTop",
@@ -176,6 +178,47 @@ function setMosaicSources(items) {
   renderMosaicSources();
 }
 
+function resolveCameraSourceURL(item = {}) {
+  const type = String(item.sourceType || "").toLowerCase().trim();
+  if (type === "rtsp" || type === "onvif") return String(item.rtspUrl || "").trim();
+  if (type === "mjpeg") return String(item.mjpegUrl || "").trim();
+  return "";
+}
+
+function cameraSourceTypeLabel(type) {
+  const normalized = String(type || "").toLowerCase().trim();
+  if (normalized === "rtsp") return "RTSP";
+  if (normalized === "mjpeg") return "MJPEG";
+  if (normalized === "onvif") return "ONVIF";
+  if (normalized === "usb") return "USB";
+  return normalized || "unknown";
+}
+
+async function loadMosaicCameraOptions() {
+  const select = document.getElementById("mosaicCameraSelect");
+  if (!select) return;
+  const params = new URLSearchParams();
+  params.set("page", "1");
+  params.set("limit", "200");
+  const type = asString("mosaicCameraType");
+  if (type) params.set("sourceType", type);
+  const result = await apiGet(`/api/v1/cameras?${params.toString()}`);
+  select.innerHTML = "";
+  const rows = result && result.data && Array.isArray(result.data.data) ? result.data.data : [];
+  for (const row of rows) {
+    const url = resolveCameraSourceURL(row);
+    if (!url) continue;
+    const option = document.createElement("option");
+    option.value = url;
+    option.dataset.cameraId = String(row.id || 0);
+    option.dataset.title = row.name || "";
+    option.dataset.sourceType = row.sourceType || "";
+    option.textContent = `${row.id || 0} - ${row.name || "camera"} [${cameraSourceTypeLabel(row.sourceType)}]`;
+    select.appendChild(option);
+  }
+  setBox("mosaicPreviewBox", result);
+}
+
 function syncMosaicTextFromSources() {
   const area = document.getElementById("pushMultiUrls");
   if (!area) return;
@@ -186,7 +229,7 @@ function renderMosaicSources() {
   const board = document.getElementById("mosaicSourceBoard");
   if (!board) return;
   if (!mosaicSources.length) {
-    board.innerHTML = "<div>暂无拼屏源，请先添加 URL 或从素材库选择。</div>";
+    board.innerHTML = "<div>暂无拼屏源，请先添加 URL，或从素材库/摄像头库选择。</div>";
     return;
   }
   board.innerHTML = "";
@@ -288,7 +331,111 @@ function getMosaicPayload() {
 
 async function refreshAccount() {
   const result = await apiGet("/api/v1/account/status");
+  applyAccountStatusView(result);
   setBox("accountBox", result);
+}
+
+function showAccountQrImage(src) {
+  const img = document.getElementById("accountQrImage");
+  if (!img) return;
+  if (!src) {
+    img.removeAttribute("src");
+    img.style.display = "none";
+    return;
+  }
+  img.src = src;
+  img.style.display = "block";
+}
+
+function setAccountQrInfo(htmlText) {
+  const info = document.getElementById("accountQrInfo");
+  if (!info) return;
+  info.innerHTML = htmlText || "";
+}
+
+function startAccountStatusPolling() {
+  if (accountStatusTicker) return;
+  accountStatusTicker = setInterval(async () => {
+    try {
+      const result = await apiGet("/api/v1/account/status");
+      applyAccountStatusView(result);
+      setBox("accountBox", result);
+    } catch (error) {
+      setAccountQrInfo(`<span style="color:#b91c1c;">状态轮询失败：${error.message || String(error)}</span>`);
+    }
+  }, 1000);
+}
+
+function stopAccountStatusPolling() {
+  if (!accountStatusTicker) return;
+  clearInterval(accountStatusTicker);
+  accountStatusTicker = null;
+}
+
+function openQrLoginPopup() {
+  const popupUrl = "/app/pages/login.html?autoclose=1";
+  const width = 520;
+  const height = 760;
+  const left = Math.max(0, Math.floor((window.screen.width - width) / 2));
+  const top = Math.max(0, Math.floor((window.screen.height - height) / 2));
+  if (qrLoginPopup && !qrLoginPopup.closed) {
+    qrLoginPopup.focus();
+    return;
+  }
+  qrLoginPopup = window.open(
+    popupUrl,
+    "gover_qr_login",
+    `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+  );
+  if (!qrLoginPopup) {
+    throw new Error("浏览器拦截了弹窗，请允许当前站点弹窗后重试");
+  }
+}
+
+function applyAccountStatusView(result) {
+  const data = result && result.data ? result.data : {};
+  const status = Number(data.status || 0);
+  if (status === 3) {
+    showAccountQrImage("");
+    setAccountQrInfo("【<span style=\"color:green;\">登录成功</span>】");
+    stopAccountStatusPolling();
+    return;
+  }
+  if (status === 1) {
+    showAccountQrImage("");
+    setAccountQrInfo("<span style=\"color:#b91c1c;\">点击“生成二维码登录”进行扫码登录</span>");
+    stopAccountStatusPolling();
+    return;
+  }
+  if (status === 2 && data.qrCodeStatus) {
+    const qr = data.qrCodeStatus;
+    if (qr.qrCode) {
+      showAccountQrImage(qr.qrCode);
+    }
+    if (Number(qr.qrCodeEffectiveTime || 0) <= 0) {
+      setAccountQrInfo("【<span style=\"color:#b91c1c;\">二维码已失效</span>】请重新生成二维码");
+    } else if (qr.isScaned) {
+      setAccountQrInfo(`【<span style="color:green;">已扫码</span>】二维码剩余有效期 <span style="color:green;">${Number(qr.qrCodeEffectiveTime || 0)}</span> 秒`);
+    } else {
+      setAccountQrInfo(`【<span style="color:#b91c1c;">未扫码</span>】二维码剩余有效期 <span style="color:green;">${Number(qr.qrCodeEffectiveTime || 0)}</span> 秒`);
+    }
+    startAccountStatusPolling();
+    return;
+  }
+  if (status === 4) {
+    showAccountQrImage("");
+    setAccountQrInfo("加载中，请稍后...");
+    startAccountStatusPolling();
+    return;
+  }
+  if (data.qrCodeStatus && data.qrCodeStatus.qrCode) {
+    showAccountQrImage(data.qrCodeStatus.qrCode);
+  }
+  if (result && result.message) {
+    setAccountQrInfo(`<span style="color:#b91c1c;">${result.message}</span>`);
+  } else {
+    setAccountQrInfo("<span style=\"color:#b91c1c;\">未知登录状态</span>");
+  }
 }
 
 async function refreshRoom() {
@@ -705,7 +852,21 @@ function bindActions() {
   document.getElementById("btnAccountStatus").onclick = withError("accountBox", refreshAccount);
   document.getElementById("btnQrStart").onclick = withError("accountBox", async () => {
     const result = await apiPost("/api/v1/account/login/qrcode/start", {});
+    const qr = result && result.data ? result.data : null;
+    if (qr && qr.qrCode) {
+      showAccountQrImage(qr.qrCode);
+      if (qr.isScaned) {
+        setAccountQrInfo(`【<span style="color:green;">已扫码</span>】二维码剩余有效期 <span style="color:green;">${Number(qr.qrCodeEffectiveTime || 0)}</span> 秒`);
+      } else {
+        setAccountQrInfo(`【<span style="color:#b91c1c;">未扫码</span>】二维码剩余有效期 <span style="color:green;">${Number(qr.qrCodeEffectiveTime || 0)}</span> 秒`);
+      }
+      startAccountStatusPolling();
+    }
     setBox("accountBox", result);
+  });
+  document.getElementById("btnQrPopup").onclick = withError("accountBox", async () => {
+    openQrLoginPopup();
+    setAccountQrInfo("扫码弹窗已打开，请在弹窗内完成登录。");
   });
   document.getElementById("btnNeedRefresh").onclick = withError("accountBox", async () => {
     const result = await apiGet("/api/v1/account/cookie/need-refresh");
@@ -724,6 +885,9 @@ function bindActions() {
   });
   document.getElementById("btnLogout").onclick = withError("accountBox", async () => {
     const result = await apiPost("/api/v1/account/logout", {});
+    stopAccountStatusPolling();
+    showAccountQrImage("");
+    setAccountQrInfo("<span style=\"color:#b91c1c;\">已登出，点击“生成二维码登录”重新登录</span>");
     setBox("accountBox", result);
     await refreshAccount();
   });
@@ -866,6 +1030,29 @@ function bindActions() {
         primary: next.length === 0,
         sourceType: "material",
         materialId: Number(option.dataset.materialId || 0) || 0,
+      });
+      if (next.length >= 9) break;
+    }
+    setMosaicSources(next);
+    setBox("mosaicPreviewBox", buildMosaicPreview());
+  });
+  document.getElementById("btnLoadMosaicCameras").onclick = withError("mosaicPreviewBox", loadMosaicCameraOptions);
+  document.getElementById("mosaicCameraType").addEventListener("change", withError("mosaicPreviewBox", loadMosaicCameraOptions));
+  document.getElementById("btnAddSelectedCameras").onclick = withError("mosaicPreviewBox", async () => {
+    const select = document.getElementById("mosaicCameraSelect");
+    const selected = Array.from(select.selectedOptions || []);
+    if (!selected.length) throw new Error("请先在摄像头库列表中多选摄像头");
+    const next = [...mosaicSources];
+    for (const option of selected) {
+      const url = (option.value || "").trim();
+      if (!url) continue;
+      if (next.some((item) => item.url === url)) continue;
+      next.push({
+        url,
+        title: option.dataset.title || option.textContent || "",
+        primary: next.length === 0,
+        sourceType: option.dataset.sourceType || "camera",
+        materialId: 0,
       });
       if (next.length >= 9) break;
     }
@@ -1283,11 +1470,22 @@ function bindActions() {
 async function init() {
   bindActions();
   applyAdvancedExportPreset(asString("advancedExportPreset") || "all", true);
+  window.addEventListener("message", (event) => {
+    const data = event && event.data ? event.data : {};
+    if (!data || data.type !== "gover-login-success") return;
+    stopAccountStatusPolling();
+    showAccountQrImage("");
+    setAccountQrInfo("【<span style=\"color:green;\">扫码登录成功</span>】Cookie 已同步");
+    refreshAccount().catch((error) => {
+      setBox("accountBox", { code: -1, message: error.message || String(error) });
+    });
+  });
   setMosaicSources([]);
   await refreshRuntimeConfig();
   await refreshAccount();
   await refreshRoom();
   await refreshPush();
+  await loadMosaicCameraOptions();
   await refreshMaterials();
   await refreshApiKeys();
   await refreshLogs();

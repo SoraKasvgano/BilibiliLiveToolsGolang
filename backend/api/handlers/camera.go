@@ -1,0 +1,268 @@
+package handlers
+
+import (
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+
+	"bilibililivetools/gover/backend/httpapi"
+	"bilibililivetools/gover/backend/router"
+	"bilibililivetools/gover/backend/store"
+)
+
+type cameraModule struct {
+	deps *router.Dependencies
+}
+
+func init() {
+	router.Register(func(deps *router.Dependencies) router.Module {
+		return &cameraModule{deps: deps}
+	})
+}
+
+func (m *cameraModule) Prefix() string {
+	return m.deps.Config.APIBase + "/cameras"
+}
+
+func (m *cameraModule) Routes() []router.Route {
+	return []router.Route{
+		{Method: http.MethodGet, Pattern: "", Summary: "List camera sources", Handler: m.list},
+		{Method: http.MethodGet, Pattern: "/{id}", Summary: "Get camera source detail", Handler: m.detail},
+		{Method: http.MethodPost, Pattern: "/save", Summary: "Create or update camera source", Handler: m.save},
+		{Method: http.MethodPost, Pattern: "/delete", Summary: "Delete camera sources", Handler: m.delete},
+		{Method: http.MethodPost, Pattern: "/{id}/apply-push", Summary: "Apply camera source to push setting", Handler: m.applyPush},
+	}
+}
+
+func (m *cameraModule) list(w http.ResponseWriter, r *http.Request) {
+	sourceType := strings.TrimSpace(r.URL.Query().Get("sourceType"))
+	if sourceType == "" {
+		sourceType = strings.TrimSpace(r.URL.Query().Get("type"))
+	}
+	result, err := m.deps.Store.ListCameraSources(r.Context(), store.CameraSourceListRequest{
+		Keyword:    strings.TrimSpace(r.URL.Query().Get("keyword")),
+		SourceType: sourceType,
+		Page:       parseIntOrDefault(r.URL.Query().Get("page"), 1),
+		Limit:      parseIntOrDefault(r.URL.Query().Get("limit"), 20),
+	})
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	httpapi.OK(w, result)
+}
+
+func (m *cameraModule) detail(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		httpapi.Error(w, -1, "invalid camera source id", http.StatusBadRequest)
+		return
+	}
+	item, err := m.deps.Store.GetCameraSourceByID(r.Context(), id)
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	httpapi.OK(w, item)
+}
+
+func (m *cameraModule) save(w http.ResponseWriter, r *http.Request) {
+	var raw struct {
+		ID                  int64  `json:"id"`
+		Name                string `json:"name"`
+		SourceType          string `json:"sourceType"`
+		RTSPURL             string `json:"rtspUrl"`
+		MJPEGURL            string `json:"mjpegUrl"`
+		ONVIFEndpoint       string `json:"onvifEndpoint"`
+		ONVIFUsername       string `json:"onvifUsername"`
+		ONVIFPassword       string `json:"onvifPassword"`
+		ONVIFProfileToken   string `json:"onvifProfileToken"`
+		USBDeviceName       string `json:"usbDeviceName"`
+		USBDeviceResolution string `json:"usbDeviceResolution"`
+		USBDeviceFramerate  int    `json:"usbDeviceFramerate"`
+		Description         string `json:"description"`
+		Enabled             *bool  `json:"enabled"`
+	}
+	if err := httpapi.DecodeJSON(r, &raw); err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	enabled := true
+	if raw.Enabled != nil {
+		enabled = *raw.Enabled
+	} else if raw.ID > 0 {
+		if current, err := m.deps.Store.GetCameraSourceByID(r.Context(), raw.ID); err == nil {
+			enabled = current.Enabled
+		}
+	}
+
+	saved, err := m.deps.Store.SaveCameraSource(r.Context(), store.CameraSourceSaveRequest{
+		ID:                  raw.ID,
+		Name:                raw.Name,
+		SourceType:          raw.SourceType,
+		RTSPURL:             raw.RTSPURL,
+		MJPEGURL:            raw.MJPEGURL,
+		ONVIFEndpoint:       raw.ONVIFEndpoint,
+		ONVIFUsername:       raw.ONVIFUsername,
+		ONVIFPassword:       raw.ONVIFPassword,
+		ONVIFProfileToken:   raw.ONVIFProfileToken,
+		USBDeviceName:       raw.USBDeviceName,
+		USBDeviceResolution: raw.USBDeviceResolution,
+		USBDeviceFramerate:  raw.USBDeviceFramerate,
+		Description:         raw.Description,
+		Enabled:             enabled,
+	})
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	httpapi.OK(w, saved)
+}
+
+func (m *cameraModule) delete(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusBadRequest)
+		return
+	}
+	affected, err := m.deps.Store.DeleteCameraSources(r.Context(), req.IDs)
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	httpapi.OK(w, map[string]any{
+		"affected": affected,
+	})
+}
+
+func (m *cameraModule) applyPush(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		httpapi.Error(w, -1, "invalid camera source id", http.StatusBadRequest)
+		return
+	}
+	camera, err := m.deps.Store.GetCameraSourceByID(r.Context(), id)
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	setting, err := m.deps.Store.GetPushSetting(r.Context())
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+
+	updateReq := buildPushUpdateRequest(setting)
+	switch camera.SourceType {
+	case store.CameraSourceTypeRTSP:
+		updateReq.InputType = string(store.InputTypeRTSP)
+		updateReq.RTSPURL = camera.RTSPURL
+		updateReq.MJPEGURL = ""
+	case store.CameraSourceTypeMJPEG:
+		updateReq.InputType = string(store.InputTypeMJPEG)
+		updateReq.MJPEGURL = camera.MJPEGURL
+		updateReq.RTSPURL = ""
+	case store.CameraSourceTypeONVIF:
+		updateReq.InputType = string(store.InputTypeONVIF)
+		updateReq.RTSPURL = camera.RTSPURL
+		updateReq.MJPEGURL = ""
+		updateReq.ONVIFEndpoint = camera.ONVIFEndpoint
+		updateReq.ONVIFUsername = camera.ONVIFUsername
+		updateReq.ONVIFPassword = camera.ONVIFPassword
+		updateReq.ONVIFProfileToken = camera.ONVIFProfileToken
+	case store.CameraSourceTypeUSB:
+		updateReq.InputType = string(store.InputTypeUSBCamera)
+		updateReq.RTSPURL = ""
+		updateReq.MJPEGURL = ""
+		updateReq.InputDeviceName = camera.USBDeviceName
+		updateReq.InputDeviceResolution = camera.USBDeviceResolution
+		updateReq.InputDeviceFramerate = camera.USBDeviceFramerate
+	default:
+		httpapi.Error(w, -1, "unsupported camera source type", http.StatusOK)
+		return
+	}
+
+	updated, err := m.deps.Store.UpdatePushSetting(r.Context(), updateReq)
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	httpapi.OK(w, map[string]any{
+		"camera":          camera,
+		"pushSetting":     updated,
+		"restartRequired": m.deps.Stream.Status() != store.PushStatusStopped,
+	})
+}
+
+func buildPushUpdateRequest(item *store.PushSetting) store.PushSettingUpdateRequest {
+	req := store.PushSettingUpdateRequest{
+		Model:                 item.Model,
+		FFmpegCommand:         item.FFmpegCommand,
+		IsAutoRetry:           item.IsAutoRetry,
+		RetryInterval:         item.RetryInterval,
+		InputType:             string(item.InputType),
+		OutputResolution:      item.OutputResolution,
+		OutputQuality:         item.OutputQuality,
+		CustomOutputParams:    item.CustomOutputParams,
+		CustomVideoCodec:      item.CustomVideoCodec,
+		IsMute:                item.IsMute,
+		InputScreen:           item.InputScreen,
+		InputDeviceName:       item.InputDeviceName,
+		InputDeviceResolution: item.InputDeviceResolution,
+		InputDeviceFramerate:  item.InputDeviceFramerate,
+		InputDevicePlugins:    item.InputDevicePlugins,
+		RTSPURL:               item.RTSPURL,
+		MJPEGURL:              item.MJPEGURL,
+		ONVIFEndpoint:         item.ONVIFEndpoint,
+		ONVIFUsername:         item.ONVIFUsername,
+		ONVIFPassword:         item.ONVIFPassword,
+		ONVIFProfileToken:     item.ONVIFProfileToken,
+		MultiInputEnabled:     item.MultiInputEnabled,
+		MultiInputLayout:      item.MultiInputLayout,
+		MultiInputURLs:        item.MultiInputURLs,
+		MultiInputMeta:        item.MultiInputMeta,
+	}
+	if item.VideoMaterialID != nil {
+		req.VideoID = *item.VideoMaterialID
+	}
+	if item.AudioMaterialID != nil {
+		audioID := *item.AudioMaterialID
+		switch item.InputType {
+		case store.InputTypeDesktop:
+			if item.InputAudioSource == store.InputAudioSourceDevice {
+				req.DesktopAudioFrom = true
+				req.DesktopAudioDevice = item.InputAudioDeviceName
+			} else {
+				req.DesktopAudioID = audioID
+			}
+		case store.InputTypeUSBCamera, store.InputTypeCameraPlus:
+			if item.InputAudioSource == store.InputAudioSourceDevice {
+				req.InputDeviceAudioFrom = true
+				req.InputDeviceAudioDevice = item.InputAudioDeviceName
+			} else {
+				req.InputDeviceAudioID = audioID
+			}
+		default:
+			req.AudioID = audioID
+		}
+	} else {
+		switch item.InputType {
+		case store.InputTypeDesktop:
+			if item.InputAudioSource == store.InputAudioSourceDevice {
+				req.DesktopAudioFrom = true
+				req.DesktopAudioDevice = item.InputAudioDeviceName
+			}
+		case store.InputTypeUSBCamera, store.InputTypeCameraPlus:
+			if item.InputAudioSource == store.InputAudioSourceDevice {
+				req.InputDeviceAudioFrom = true
+				req.InputDeviceAudioDevice = item.InputAudioDeviceName
+			}
+		}
+	}
+	return req
+}

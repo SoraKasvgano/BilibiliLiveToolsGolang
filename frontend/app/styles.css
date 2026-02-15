@@ -134,6 +134,31 @@ pre {
   word-break: break-all;
 }
 
+.qr-login-panel {
+  margin: 10px 0 12px;
+  border: 1px dashed #b6c7e6;
+  border-radius: 10px;
+  padding: 12px;
+  background: #f8fbff;
+  text-align: center;
+}
+
+#accountQrImage {
+  width: 220px;
+  height: 220px;
+  display: none;
+  margin: 0 auto 8px;
+  border: 1px solid #d6e0f2;
+  border-radius: 8px;
+  background: #fff;
+}
+
+#accountQrInfo {
+  color: #1e3a8a;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
 #mosaicSourceBoard {
   margin-top: 6px;
   padding: 10px;

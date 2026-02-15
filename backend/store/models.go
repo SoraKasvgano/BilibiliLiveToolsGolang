@@ -452,6 +452,78 @@ type DeviceInfo struct {
 	Type string `json:"type"`
 }
 
+type CameraSourceType string
+
+const (
+	CameraSourceTypeRTSP  CameraSourceType = "rtsp"
+	CameraSourceTypeMJPEG CameraSourceType = "mjpeg"
+	CameraSourceTypeONVIF CameraSourceType = "onvif"
+	CameraSourceTypeUSB   CameraSourceType = "usb"
+)
+
+func NormalizeCameraSourceType(raw string) CameraSourceType {
+	switch CameraSourceType(strings.ToLower(strings.TrimSpace(raw))) {
+	case CameraSourceTypeRTSP, CameraSourceTypeMJPEG, CameraSourceTypeONVIF, CameraSourceTypeUSB:
+		return CameraSourceType(strings.ToLower(strings.TrimSpace(raw)))
+	default:
+		return ""
+	}
+}
+
+type CameraSource struct {
+	ID                  int64            `json:"id"`
+	Name                string           `json:"name"`
+	SourceType          CameraSourceType `json:"sourceType"`
+	RTSPURL             string           `json:"rtspUrl"`
+	MJPEGURL            string           `json:"mjpegUrl"`
+	ONVIFEndpoint       string           `json:"onvifEndpoint"`
+	ONVIFUsername       string           `json:"onvifUsername"`
+	ONVIFPassword       string           `json:"onvifPassword"`
+	ONVIFProfileToken   string           `json:"onvifProfileToken"`
+	USBDeviceName       string           `json:"usbDeviceName"`
+	USBDeviceResolution string           `json:"usbDeviceResolution"`
+	USBDeviceFramerate  int              `json:"usbDeviceFramerate"`
+	Description         string           `json:"description"`
+	Enabled             bool             `json:"enabled"`
+	CreatedAt           time.Time        `json:"createdAt"`
+	UpdatedAt           time.Time        `json:"updatedAt"`
+}
+
+func (c CameraSource) StreamURL() string {
+	switch c.SourceType {
+	case CameraSourceTypeRTSP, CameraSourceTypeONVIF:
+		return strings.TrimSpace(c.RTSPURL)
+	case CameraSourceTypeMJPEG:
+		return strings.TrimSpace(c.MJPEGURL)
+	default:
+		return ""
+	}
+}
+
+type CameraSourceListRequest struct {
+	Keyword    string
+	SourceType string
+	Page       int
+	Limit      int
+}
+
+type CameraSourceSaveRequest struct {
+	ID                  int64  `json:"id"`
+	Name                string `json:"name"`
+	SourceType          string `json:"sourceType"`
+	RTSPURL             string `json:"rtspUrl"`
+	MJPEGURL            string `json:"mjpegUrl"`
+	ONVIFEndpoint       string `json:"onvifEndpoint"`
+	ONVIFUsername       string `json:"onvifUsername"`
+	ONVIFPassword       string `json:"onvifPassword"`
+	ONVIFProfileToken   string `json:"onvifProfileToken"`
+	USBDeviceName       string `json:"usbDeviceName"`
+	USBDeviceResolution string `json:"usbDeviceResolution"`
+	USBDeviceFramerate  int    `json:"usbDeviceFramerate"`
+	Description         string `json:"description"`
+	Enabled             bool   `json:"enabled"`
+}
+
 type LiveEvent struct {
 	ID        int64     `json:"id"`
 	SessionID *int64    `json:"sessionId,omitempty"`

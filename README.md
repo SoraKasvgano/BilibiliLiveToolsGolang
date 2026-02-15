@@ -60,10 +60,18 @@ go run .
 
 启动后可访问：
 
-- 控制台：`http://127.0.0.1:18686/`
+- 功能首页：`http://127.0.0.1:18686/`
+- 1:1 扫码登录页：`http://127.0.0.1:18686/app/pages/login.html`
+- 高级控制台：`http://127.0.0.1:18686/app/index.html`
 - Swagger：`http://127.0.0.1:18686/swagger/`
 - OpenAPI：`http://127.0.0.1:18686/openapi.json`
+
+登录页说明：
+
+- `app/pages/login.html` 可直接使用；
+- 若以弹窗方式打开 `app/pages/login.html?autoclose=1`，扫码成功后会自动通知主页面并尝试自动关闭弹窗。
 - 迁移版页面：
+  - `http://127.0.0.1:18686/app/pages/cameras.html`
   - `http://127.0.0.1:18686/app/pages/push.html`
   - `http://127.0.0.1:18686/app/pages/room.html`
   - `http://127.0.0.1:18686/app/pages/material.html`
@@ -184,6 +192,8 @@ cd gover
 - 推流设置：`GET/POST /api/v1/push/setting`
 - 推流控制：`POST /api/v1/push/start|stop|restart`
 - 推流状态：`GET /api/v1/push/status`
+- 摄像头库：`GET /api/v1/cameras`、`GET /api/v1/cameras/{id}`、`POST /api/v1/cameras/save|delete`
+- 摄像头一键套用推流：`POST /api/v1/cameras/{id}/apply-push`
 - ONVIF 发现：`GET /api/v1/ptz/discover`
 - B站错误日志：`GET /api/v1/integration/bilibili/error-logs`
 - 弹幕消费器配置：`GET/POST /api/v1/integration/danmaku/consumer/setting`

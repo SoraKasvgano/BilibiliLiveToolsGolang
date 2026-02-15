@@ -1357,6 +1357,301 @@ func (s *Store) CountDanmakuRecordsSince(ctx context.Context, roomID int64, sinc
 	return total, err
 }
 
+func (s *Store) ListCameraSources(ctx context.Context, req CameraSourceListRequest) (QueryPageModel[CameraSource], error) {
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	req.Limit = clampLimit(req.Limit, 20, 200)
+
+	filter := "WHERE 1=1"
+	args := make([]any, 0, 4)
+	keyword := strings.TrimSpace(req.Keyword)
+	if keyword != "" {
+		filter += ` AND (name LIKE ? OR rtsp_url LIKE ? OR mjpeg_url LIKE ? OR onvif_endpoint LIKE ? OR usb_device_name LIKE ?)`
+		likeValue := "%" + keyword + "%"
+		args = append(args, likeValue, likeValue, likeValue, likeValue, likeValue)
+	}
+	sourceType := NormalizeCameraSourceType(req.SourceType)
+	if sourceType != "" {
+		filter += " AND source_type = ?"
+		args = append(args, string(sourceType))
+	}
+
+	var total int64
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM camera_sources "+filter, args...).Scan(&total); err != nil {
+		return QueryPageModel[CameraSource]{}, err
+	}
+
+	offset := (req.Page - 1) * req.Limit
+	query := `SELECT
+		id, name, source_type, rtsp_url, mjpeg_url,
+		onvif_endpoint, onvif_username, onvif_password, onvif_profile_token,
+		usb_device_name, usb_device_resolution, usb_device_framerate,
+		description, enabled, created_at, updated_at
+	FROM camera_sources ` + filter + ` ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`
+	args = append(args, req.Limit, offset)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return QueryPageModel[CameraSource]{}, err
+	}
+	defer rows.Close()
+
+	items := make([]CameraSource, 0, req.Limit)
+	for rows.Next() {
+		item, scanErr := scanCameraSource(rows)
+		if scanErr != nil {
+			return QueryPageModel[CameraSource]{}, scanErr
+		}
+		items = append(items, *item)
+	}
+	if err := rows.Err(); err != nil {
+		return QueryPageModel[CameraSource]{}, err
+	}
+	return QueryPageModel[CameraSource]{
+		Page:      req.Page,
+		PageCount: len(items),
+		DataCount: total,
+		PageSize:  req.Limit,
+		Data:      items,
+	}, nil
+}
+
+func (s *Store) GetCameraSourceByID(ctx context.Context, id int64) (*CameraSource, error) {
+	if id <= 0 {
+		return nil, errors.New("camera source id must be greater than zero")
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT
+		id, name, source_type, rtsp_url, mjpeg_url,
+		onvif_endpoint, onvif_username, onvif_password, onvif_profile_token,
+		usb_device_name, usb_device_resolution, usb_device_framerate,
+		description, enabled, created_at, updated_at
+	FROM camera_sources WHERE id=?`, id)
+	return scanCameraSource(row)
+}
+
+func (s *Store) SaveCameraSource(ctx context.Context, req CameraSourceSaveRequest) (*CameraSource, error) {
+	item, err := sanitizeCameraSourceForWrite(req)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+
+	if req.ID > 0 {
+		if _, getErr := s.GetCameraSourceByID(ctx, req.ID); getErr != nil {
+			return nil, getErr
+		}
+		_, err = s.db.ExecContext(ctx, `UPDATE camera_sources SET
+			name = ?,
+			source_type = ?,
+			rtsp_url = ?,
+			mjpeg_url = ?,
+			onvif_endpoint = ?,
+			onvif_username = ?,
+			onvif_password = ?,
+			onvif_profile_token = ?,
+			usb_device_name = ?,
+			usb_device_resolution = ?,
+			usb_device_framerate = ?,
+			description = ?,
+			enabled = ?,
+			updated_at = ?
+		WHERE id = ?`,
+			item.Name,
+			item.SourceType,
+			item.RTSPURL,
+			item.MJPEGURL,
+			item.ONVIFEndpoint,
+			item.ONVIFUsername,
+			item.ONVIFPassword,
+			item.ONVIFProfileToken,
+			item.USBDeviceName,
+			item.USBDeviceResolution,
+			item.USBDeviceFramerate,
+			item.Description,
+			boolToInt(item.Enabled),
+			now,
+			req.ID,
+		)
+		if err != nil {
+			return nil, err
+		}
+		return s.GetCameraSourceByID(ctx, req.ID)
+	}
+
+	result, err := s.db.ExecContext(ctx, `INSERT INTO camera_sources (
+		name, source_type, rtsp_url, mjpeg_url, onvif_endpoint, onvif_username, onvif_password, onvif_profile_token,
+		usb_device_name, usb_device_resolution, usb_device_framerate, description, enabled, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.Name,
+		item.SourceType,
+		item.RTSPURL,
+		item.MJPEGURL,
+		item.ONVIFEndpoint,
+		item.ONVIFUsername,
+		item.ONVIFPassword,
+		item.ONVIFProfileToken,
+		item.USBDeviceName,
+		item.USBDeviceResolution,
+		item.USBDeviceFramerate,
+		item.Description,
+		boolToInt(item.Enabled),
+		now,
+		now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	return s.GetCameraSourceByID(ctx, id)
+}
+
+func (s *Store) DeleteCameraSources(ctx context.Context, ids []int64) (int64, error) {
+	keys := dedupPositiveIDs(ids)
+	if len(keys) == 0 {
+		return 0, nil
+	}
+	placeholders := make([]string, 0, len(keys))
+	args := make([]any, 0, len(keys))
+	for _, id := range keys {
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	query := `DELETE FROM camera_sources WHERE id IN (` + strings.Join(placeholders, ",") + `)`
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+	return affected, nil
+}
+
+func scanCameraSource(scanner interface {
+	Scan(dest ...any) error
+}) (*CameraSource, error) {
+	item := CameraSource{}
+	var enabled int
+	var createdAt string
+	var updatedAt string
+	if err := scanner.Scan(
+		&item.ID,
+		&item.Name,
+		&item.SourceType,
+		&item.RTSPURL,
+		&item.MJPEGURL,
+		&item.ONVIFEndpoint,
+		&item.ONVIFUsername,
+		&item.ONVIFPassword,
+		&item.ONVIFProfileToken,
+		&item.USBDeviceName,
+		&item.USBDeviceResolution,
+		&item.USBDeviceFramerate,
+		&item.Description,
+		&enabled,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return nil, err
+	}
+	item.SourceType = NormalizeCameraSourceType(string(item.SourceType))
+	item.Enabled = enabled == 1
+	item.CreatedAt = parseSQLiteTime(createdAt)
+	item.UpdatedAt = parseSQLiteTime(updatedAt)
+	return &item, nil
+}
+
+func sanitizeCameraSourceForWrite(req CameraSourceSaveRequest) (*CameraSource, error) {
+	sourceType := NormalizeCameraSourceType(req.SourceType)
+	if sourceType == "" {
+		return nil, errors.New("unsupported camera source type")
+	}
+	item := &CameraSource{
+		Name:                strings.TrimSpace(req.Name),
+		SourceType:          sourceType,
+		RTSPURL:             strings.TrimSpace(req.RTSPURL),
+		MJPEGURL:            strings.TrimSpace(req.MJPEGURL),
+		ONVIFEndpoint:       strings.TrimSpace(req.ONVIFEndpoint),
+		ONVIFUsername:       strings.TrimSpace(req.ONVIFUsername),
+		ONVIFPassword:       strings.TrimSpace(req.ONVIFPassword),
+		ONVIFProfileToken:   strings.TrimSpace(req.ONVIFProfileToken),
+		USBDeviceName:       strings.TrimSpace(req.USBDeviceName),
+		USBDeviceResolution: strings.TrimSpace(req.USBDeviceResolution),
+		USBDeviceFramerate:  req.USBDeviceFramerate,
+		Description:         strings.TrimSpace(req.Description),
+		Enabled:             req.Enabled,
+	}
+	if item.Name == "" {
+		item.Name = buildDefaultCameraName(item)
+	}
+	if item.USBDeviceResolution == "" {
+		item.USBDeviceResolution = "1280x720"
+	}
+	if item.USBDeviceFramerate <= 0 {
+		item.USBDeviceFramerate = 30
+	}
+
+	switch sourceType {
+	case CameraSourceTypeRTSP:
+		if item.RTSPURL == "" {
+			return nil, errors.New("rtsp url is required")
+		}
+	case CameraSourceTypeMJPEG:
+		if item.MJPEGURL == "" {
+			return nil, errors.New("mjpeg url is required")
+		}
+	case CameraSourceTypeONVIF:
+		if item.ONVIFEndpoint == "" && item.RTSPURL == "" {
+			return nil, errors.New("onvif endpoint or rtsp url is required")
+		}
+	case CameraSourceTypeUSB:
+		if item.USBDeviceName == "" {
+			return nil, errors.New("usb device name is required")
+		}
+	}
+	return item, nil
+}
+
+func buildDefaultCameraName(item *CameraSource) string {
+	if item == nil {
+		return "camera"
+	}
+	switch item.SourceType {
+	case CameraSourceTypeRTSP:
+		return "RTSP Camera"
+	case CameraSourceTypeMJPEG:
+		return "MJPEG Camera"
+	case CameraSourceTypeONVIF:
+		return "ONVIF Camera"
+	case CameraSourceTypeUSB:
+		return "USB Camera"
+	default:
+		return "Camera"
+	}
+}
+
+func dedupPositiveIDs(ids []int64) []int64 {
+	unique := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id > 0 {
+			unique[id] = struct{}{}
+		}
+	}
+	if len(unique) == 0 {
+		return nil
+	}
+	keys := make([]int64, 0, len(unique))
+	for id := range unique {
+		keys = append(keys, id)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	return keys
+}
+
 func (s *Store) EnsureMaterialFile(path string) error {
 	if strings.TrimSpace(path) == "" {
 		return errors.New("empty path")

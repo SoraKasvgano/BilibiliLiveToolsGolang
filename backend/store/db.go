@@ -81,8 +81,19 @@ func (s *Store) WithTx(ctx context.Context, fn func(*sql.Tx) error) error {
 }
 
 func (s *Store) migrate(ctx context.Context) error {
+	ddlStatements := make([]string, 0, len(schemaStatements))
+	for _, stmt := range schemaStatements {
+		if isPragmaStatement(stmt) {
+			if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+				return err
+			}
+			continue
+		}
+		ddlStatements = append(ddlStatements, stmt)
+	}
+
 	if err := s.WithTx(ctx, func(tx *sql.Tx) error {
-		for _, stmt := range schemaStatements {
+		for _, stmt := range ddlStatements {
 			if _, err := tx.ExecContext(ctx, stmt); err != nil {
 				return err
 			}
@@ -97,6 +108,10 @@ func (s *Store) migrate(ctx context.Context) error {
 		return err
 	}
 	return s.ensureSchemaUpgrades(ctx)
+}
+
+func isPragmaStatement(stmt string) bool {
+	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(stmt)), "PRAGMA ")
 }
 
 func (s *Store) ensureSchemaUpgrades(ctx context.Context) error {

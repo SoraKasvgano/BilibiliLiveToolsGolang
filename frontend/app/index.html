@@ -12,6 +12,8 @@
       <h1>Gover 控制台（Go 重写版）</h1>
       <p>支持 USB 摄像头 / 视频文件 / RTSP / MJPEG 推流，预留弹幕 PTZ 与机器人联动接口。</p>
       <div class="hero-links">
+        <a href="/app/pages/home.html" target="_blank" rel="noopener">功能首页</a>
+        <a href="/app/pages/login.html" target="_blank" rel="noopener">扫码登录页(1:1)</a>
         <a href="/swagger/" target="_blank" rel="noopener">离线 Swagger 文档</a>
         <a href="/openapi.json" target="_blank" rel="noopener">OpenAPI JSON</a>
         <a href="/app/pages/push.html" target="_blank" rel="noopener">Push 页面(迁移版)</a>
@@ -76,8 +78,13 @@
       <div class="actions">
         <button id="btnAccountStatus">刷新登录状态</button>
         <button id="btnQrStart">生成二维码登录</button>
+        <button id="btnQrPopup">弹窗扫码登录</button>
         <button id="btnNeedRefresh">检查Cookie刷新需求</button>
         <button id="btnRefreshCookie">执行Cookie刷新</button>
+      </div>
+      <div class="qr-login-panel">
+        <img id="accountQrImage" alt="登录二维码" />
+        <div id="accountQrInfo">点击“生成二维码登录”获取二维码</div>
       </div>
       <label>手动 Cookie（明文）
         <textarea id="cookieContent" rows="3" placeholder="SESSDATA=...; bili_jct=...;"></textarea>
@@ -174,6 +181,26 @@
       <div class="actions">
         <button id="btnLoadMosaicMaterials">加载素材库</button>
         <button id="btnAddSelectedMaterials">添加选中素材到拼屏</button>
+      </div>
+      <label>摄像头库多选自动填充（RTSP/MJPEG/ONVIF）
+        <select id="mosaicCameraSelect" multiple size="6"></select>
+      </label>
+      <div class="grid two">
+        <label>摄像头类型筛选
+          <select id="mosaicCameraType">
+            <option value="">全部</option>
+            <option value="rtsp">RTSP</option>
+            <option value="mjpeg">MJPEG</option>
+            <option value="onvif">ONVIF</option>
+          </select>
+        </label>
+        <label>提示
+          <input value="ONVIF 使用绑定 RTSP 推流地址；USB 不支持拼屏合流" disabled />
+        </label>
+      </div>
+      <div class="actions">
+        <button id="btnLoadMosaicCameras">加载摄像头库</button>
+        <button id="btnAddSelectedCameras">添加选中摄像头到拼屏</button>
       </div>
       <label>拼屏拖拽排布（拖动排序，设主画面，标题叠加）
         <div id="mosaicSourceBoard"></div>

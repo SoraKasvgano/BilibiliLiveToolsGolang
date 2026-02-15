@@ -57,11 +57,14 @@
     const container = document.getElementById("sharedNav");
     if (!container) return;
     const links = [
-      { key: "dashboard", label: "主控制台", href: "/app/index.html" },
-      { key: "push", label: "Push 迁移页", href: "/app/pages/push.html" },
-      { key: "room", label: "Room 迁移页", href: "/app/pages/room.html" },
-      { key: "material", label: "Material 迁移页", href: "/app/pages/material.html" },
-      { key: "monitor", label: "Monitor 迁移页", href: "/app/pages/monitor.html" },
+      { key: "home", label: "功能首页", href: "/app/pages/home.html" },
+      { key: "login", label: "扫码登录", href: "/app/pages/login.html" },
+      { key: "cameras", label: "摄像头管理", href: "/app/pages/cameras.html" },
+      { key: "push", label: "推流配置", href: "/app/pages/push.html" },
+      { key: "room", label: "直播间设置", href: "/app/pages/room.html" },
+      { key: "material", label: "素材库", href: "/app/pages/material.html" },
+      { key: "monitor", label: "监控通知", href: "/app/pages/monitor.html" },
+      { key: "advanced", label: "高级控制台", href: "/app/index.html" },
       { key: "legacy", label: "Legacy 兼容资源", href: "/legacy/layuiadmin/index.js" },
     ];
     container.className = "nav";

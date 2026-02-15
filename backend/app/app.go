@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"path"
@@ -170,21 +171,48 @@ func (a *App) serveSwagger(w http.ResponseWriter, r *http.Request, cleanPath str
 
 func (a *App) serveFrontend(w http.ResponseWriter, r *http.Request, cleanPath string) {
 	if cleanPath == "/" {
-		cleanPath = "/app/index.html"
+		cleanPath = "/app/pages/home.html"
 	}
 	filePath := strings.TrimPrefix(cleanPath, "/")
 	if filePath == "app" {
-		filePath = "app/index.html"
+		filePath = "app/pages/home.html"
 	}
 
-	if _, err := fs.Stat(a.frontendFS, filePath); err == nil {
-		http.FileServer(http.FS(a.frontendFS)).ServeHTTP(w, r)
+	if info, err := fs.Stat(a.frontendFS, filePath); err == nil {
+		if info.IsDir() {
+			indexPath := path.Join(filePath, "index.html")
+			if _, indexErr := fs.Stat(a.frontendFS, indexPath); indexErr == nil {
+				filePath = indexPath
+			}
+		}
+		if filePath != "" {
+			if strings.HasSuffix(strings.ToLower(filePath), "index.html") {
+				content, readErr := fs.ReadFile(a.frontendFS, filePath)
+				if readErr == nil {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(content)
+					return
+				}
+			}
+			// Rewrite URL path to mapped embedded file to avoid root directory listing.
+			rewritten := r.Clone(r.Context())
+			rewritten.URL.Path = "/" + strings.TrimPrefix(filePath, "/")
+			if ext := strings.TrimSpace(path.Ext(filePath)); ext != "" {
+				if contentType := mime.TypeByExtension(ext); strings.TrimSpace(contentType) != "" {
+					w.Header().Set("Content-Type", contentType)
+				}
+			}
+			http.FileServer(http.FS(a.frontendFS)).ServeHTTP(w, rewritten)
+			return
+		}
+		http.NotFound(w, r)
 		return
 	}
 
 	// SPA fallback: unknown non-API routes go to frontend app entry.
-	if _, err := fs.Stat(a.frontendFS, "app/index.html"); err == nil {
-		content, readErr := fs.ReadFile(a.frontendFS, "app/index.html")
+	if _, err := fs.Stat(a.frontendFS, "app/pages/home.html"); err == nil {
+		content, readErr := fs.ReadFile(a.frontendFS, "app/pages/home.html")
 		if readErr == nil {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
@@ -401,6 +429,29 @@ func routeExample(method string, pattern string) map[string]any {
 					"roomId": 123456,
 				},
 			},
+		}
+	case "POST /api/v1/cameras/save":
+		return map[string]any{
+			"request": map[string]any{
+				"name":              "客厅主机位",
+				"sourceType":        "onvif",
+				"rtspUrl":           "rtsp://admin:123456@192.168.1.10/stream1",
+				"onvifEndpoint":     "http://192.168.1.10/onvif/device_service",
+				"onvifUsername":     "admin",
+				"onvifPassword":     "123456",
+				"onvifProfileToken": "profile_1",
+				"enabled":           true,
+			},
+		}
+	case "POST /api/v1/cameras/delete":
+		return map[string]any{
+			"request": map[string]any{
+				"ids": []int64{1, 2},
+			},
+		}
+	case "POST /api/v1/cameras/{id}/apply-push":
+		return map[string]any{
+			"request": map[string]any{},
 		}
 	case "POST /api/v1/integration/bilibili/alert-setting":
 		return map[string]any{

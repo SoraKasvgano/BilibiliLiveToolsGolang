@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gover 功能首页</title>
+  <link rel="stylesheet" href="/app/pages/shared.css" />
+</head>
+<body>
+  <header class="shared-header">
+    <div id="sharedNav"></div>
+  </header>
+  <main class="page-shell">
+    <section class="page-card">
+      <h1>功能导航（按业务分区）</h1>
+      <div id="roleTip" class="role-tip"></div>
+      <div class="menu-grid">
+        <a class="menu-card" href="/app/pages/login.html">
+          <h3>账号登录</h3>
+          <p>1:1 扫码登录交互，显示二维码、扫码状态、剩余有效期。</p>
+        </a>
+        <a class="menu-card" href="/app/pages/cameras.html">
+          <h3>摄像头管理</h3>
+          <p>统一管理 RTSP/MJPEG/ONVIF/USB，支持发现 ONVIF 后保存独立账号密码。</p>
+        </a>
+        <a class="menu-card" href="/app/pages/push.html">
+          <h3>推流控制</h3>
+          <p>从摄像头库一键套用到推流，开始/停止/重启与状态查看。</p>
+        </a>
+        <a class="menu-card" href="/app/pages/room.html">
+          <h3>直播间管理</h3>
+          <p>房间号、分区、标题与公告等直播间信息维护。</p>
+        </a>
+        <a class="menu-card" href="/app/pages/material.html">
+          <h3>素材管理</h3>
+          <p>上传/管理视频与音频素材，支撑推流与拼屏配置。</p>
+        </a>
+        <a class="menu-card" href="/app/pages/monitor.html">
+          <h3>监控与通知</h3>
+          <p>邮件测试、运行日志查看、告警链路联调。</p>
+        </a>
+        <a class="menu-card" href="/app/index.html">
+          <h3>高级控制台</h3>
+          <p>完整高级配置（集成队列、统计、维护等），适合进阶用户。</p>
+        </a>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app/pages/shared.js"></script>
+  <script>
+    window.GoverShared.initPage({ active: "home" });
+  </script>
+</body>
+</html>
