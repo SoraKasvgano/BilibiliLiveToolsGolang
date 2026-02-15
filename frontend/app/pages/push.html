@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Push 页面（迁移版）</title>
+  <link rel="stylesheet" href="/app/pages/shared.css" />
+</head>
+<body>
+  <header class="shared-header">
+    <div id="sharedNav"></div>
+  </header>
+  <main class="page-shell">
+    <section class="page-card">
+      <h1>Push 页面（迁移版）</h1>
+      <div id="roleTip" class="role-tip"></div>
+      <div class="grid two">
+        <label>模式
+          <select id="model">
+            <option value="1">Normal</option>
+            <option value="2">Advance</option>
+          </select>
+        </label>
+        <label>输入类型
+          <select id="inputType">
+            <option value="video">视频文件</option>
+            <option value="usb_camera">USB 摄像头</option>
+            <option value="desktop">桌面</option>
+            <option value="rtsp">RTSP</option>
+            <option value="mjpeg">MJPEG</option>
+            <option value="onvif">ONVIF</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>输出分辨率<input id="resolution" value="1280x720" /></label>
+        <label>输出质量
+          <select id="quality">
+            <option value="1">高</option>
+            <option value="2" selected>中</option>
+            <option value="3">低</option>
+            <option value="9">原画</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>RTSP URL<input id="rtspUrl" /></label>
+        <label>MJPEG URL<input id="mjpegUrl" /></label>
+      </div>
+      <div class="actions">
+        <button id="load">读取配置</button>
+        <button id="save" data-perm="operator,admin">保存配置</button>
+        <button id="start" data-perm="operator,admin">开始推流</button>
+        <button id="stop" data-perm="operator,admin">停止推流</button>
+        <button id="restart" data-perm="operator,admin">重启推流</button>
+        <button id="status">读取状态</button>
+      </div>
+      <pre id="box">{}</pre>
+    </section>
+  </main>
+
+  <script src="/app/pages/shared.js"></script>
+  <script>
+    const { initPage, requestJSON, showJSON, bindAction } = window.GoverShared;
+    initPage({ active: "push" });
+
+    async function loadSetting() {
+      const data = await requestJSON("/api/v1/push/setting");
+      const item = data.data || {};
+      document.getElementById("model").value = String(item.model || 1);
+      document.getElementById("inputType").value = item.inputType || "video";
+      document.getElementById("resolution").value = item.outputResolution || "1280x720";
+      document.getElementById("quality").value = String(item.outputQuality || 2);
+      document.getElementById("rtspUrl").value = item.rtspUrl || "";
+      document.getElementById("mjpegUrl").value = item.mjpegUrl || "";
+      showJSON("box", data);
+    }
+
+    async function saveSetting() {
+      const payload = {
+        model: Number(document.getElementById("model").value || 1),
+        inputType: document.getElementById("inputType").value || "video",
+        outputResolution: document.getElementById("resolution").value || "1280x720",
+        outputQuality: Number(document.getElementById("quality").value || 2),
+        rtspUrl: document.getElementById("rtspUrl").value || "",
+        mjpegUrl: document.getElementById("mjpegUrl").value || ""
+      };
+      const result = await requestJSON("/api/v1/push/setting", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      showJSON("box", result);
+    }
+
+    bindAction("load", loadSetting, "box");
+    bindAction("save", saveSetting, "box");
+    bindAction("start", async () => showJSON("box", await requestJSON("/api/v1/push/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })), "box");
+    bindAction("stop", async () => showJSON("box", await requestJSON("/api/v1/push/stop", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })), "box");
+    bindAction("restart", async () => showJSON("box", await requestJSON("/api/v1/push/restart", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })), "box");
+    bindAction("status", async () => showJSON("box", await requestJSON("/api/v1/push/status")), "box");
+
+    loadSetting().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
+  </script>
+</body>
+</html>

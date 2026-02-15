@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monitor 页面（迁移版）</title>
+  <link rel="stylesheet" href="/app/pages/shared.css" />
+</head>
+<body>
+  <header class="shared-header">
+    <div id="sharedNav"></div>
+  </header>
+  <main class="page-shell">
+    <section class="page-card">
+      <h1>Monitor 页面（迁移版）</h1>
+      <div id="roleTip" class="role-tip"></div>
+
+      <div class="grid two">
+        <label>启用监控
+          <select id="isEnabled">
+            <option value="true">开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </label>
+        <label>房间号<input id="roomId" type="number" /></label>
+      </div>
+      <label>房间URL<input id="roomUrl" /></label>
+      <div class="actions">
+        <button id="load">读取配置</button>
+        <button id="saveRoom" data-perm="operator,admin">保存房间监控</button>
+        <button id="status">读取状态日志</button>
+      </div>
+
+      <div class="grid two">
+        <label>SMTP服务器<input id="smtpServer" /></label>
+        <label>SMTP端口<input id="smtpPort" type="number" value="25" /></label>
+      </div>
+      <div class="grid two">
+        <label>发件邮箱<input id="mailAddress" /></label>
+        <label>发件人名称<input id="mailName" /></label>
+      </div>
+      <div class="grid two">
+        <label>密码<input id="password" type="password" /></label>
+        <label>收件人(分号分隔)<input id="receivers" /></label>
+      </div>
+      <div class="grid two">
+        <label>SSL
+          <select id="smtpSsl">
+            <option value="false">关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </label>
+        <label>启用邮件通知
+          <select id="emailEnabled">
+            <option value="false">关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </label>
+      </div>
+      <div class="actions">
+        <button id="saveEmail" data-perm="operator,admin">保存邮件配置</button>
+        <button id="testEmail" data-perm="operator,admin">发送测试邮件</button>
+      </div>
+      <div class="grid two">
+        <label>测试邮件标题<input id="testSubject" value="[Gover] Monitor test email" /></label>
+        <label>状态日志级别
+          <select id="statusLevel">
+            <option value="">全部</option>
+            <option value="INFO">INFO</option>
+            <option value="WARN">WARN</option>
+            <option value="ERROR">ERROR</option>
+          </select>
+        </label>
+      </div>
+      <label>测试邮件正文<textarea id="testBody" rows="3">This is a monitor test email from Gover.</textarea></label>
+      <label>状态日志条数<input id="statusLimit" type="number" value="100" /></label>
+      <pre id="box">{}</pre>
+    </section>
+  </main>
+
+  <script src="/app/pages/shared.js"></script>
+  <script>
+    const { initPage, requestJSON, showJSON, bindAction } = window.GoverShared;
+    initPage({ active: "monitor" });
+
+    async function loadSetting() {
+      const result = await requestJSON("/api/v1/monitor");
+      const item = result.data || {};
+      document.getElementById("isEnabled").value = item.isEnabled ? "true" : "false";
+      document.getElementById("roomId").value = item.roomId || "";
+      document.getElementById("roomUrl").value = item.roomUrl || "";
+      document.getElementById("smtpServer").value = item.smtpServer || "";
+      document.getElementById("smtpPort").value = item.smtpPort || 25;
+      document.getElementById("mailAddress").value = item.mailAddress || "";
+      document.getElementById("mailName").value = item.mailName || "";
+      document.getElementById("password").value = item.password || "";
+      document.getElementById("receivers").value = item.receivers || "";
+      document.getElementById("smtpSsl").value = item.smtpSsl ? "true" : "false";
+      document.getElementById("emailEnabled").value = item.isEnableEmailNotice ? "true" : "false";
+      showJSON("box", result);
+    }
+
+    bindAction("load", loadSetting, "box");
+    bindAction("saveRoom", async () => {
+      const payload = {
+        isEnabled: document.getElementById("isEnabled").value === "true",
+        roomId: Number(document.getElementById("roomId").value || 0),
+        roomUrl: document.getElementById("roomUrl").value || ""
+      };
+      showJSON("box", await requestJSON("/api/v1/monitor/room", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }));
+    }, "box");
+    bindAction("saveEmail", async () => {
+      const payload = {
+        isEnableEmailNotice: document.getElementById("emailEnabled").value === "true",
+        smtpServer: document.getElementById("smtpServer").value || "",
+        smtpSsl: document.getElementById("smtpSsl").value === "true",
+        smtpPort: Number(document.getElementById("smtpPort").value || 25),
+        mailAddress: document.getElementById("mailAddress").value || "",
+        mailName: document.getElementById("mailName").value || "",
+        password: document.getElementById("password").value || "",
+        receivers: document.getElementById("receivers").value || ""
+      };
+      showJSON("box", await requestJSON("/api/v1/monitor/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }));
+    }, "box");
+    bindAction("testEmail", async () => {
+      const rawReceivers = (document.getElementById("receivers").value || "")
+        .split(/[;,，；]/)
+        .map((v) => v.trim())
+        .filter((v) => v.length > 0);
+      const payload = {
+        subject: document.getElementById("testSubject").value || "",
+        body: document.getElementById("testBody").value || "",
+        receivers: rawReceivers
+      };
+      showJSON("box", await requestJSON("/api/v1/monitor/email/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }));
+    }, "box");
+    bindAction("status", async () => {
+      const limit = Number(document.getElementById("statusLimit").value || 100);
+      const level = encodeURIComponent(document.getElementById("statusLevel").value || "");
+      showJSON("box", await requestJSON(`/api/v1/monitor/status?limit=${limit}&level=${level}`));
+    }, "box");
+
+    loadSetting().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
+  </script>
+</body>
+</html>

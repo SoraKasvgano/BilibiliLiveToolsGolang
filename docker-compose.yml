@@ -1,0 +1,18 @@
+services:
+  gover:
+    container_name: gover
+    image: gover:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: ${APP_NAME:-BilibiliLiveToolsGover}
+    restart: unless-stopped
+    ports:
+      - "18686:18686"
+    environment:
+      GOVER_CONFIG_FILE: /app/data/config.json
+      GOVER_FFMPEG_PATH: /app/ffmpeg/linux-x64/ffmpeg
+    volumes:
+      - ./data:/app/data
+      - ./ffmpeg:/app/ffmpeg

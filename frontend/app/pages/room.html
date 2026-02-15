@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Room 页面（迁移版）</title>
+  <link rel="stylesheet" href="/app/pages/shared.css" />
+</head>
+<body>
+  <header class="shared-header">
+    <div id="sharedNav"></div>
+  </header>
+  <main class="page-shell">
+    <section class="page-card">
+      <h1>Room 页面（迁移版）</h1>
+      <div id="roleTip" class="role-tip"></div>
+      <div class="grid two">
+        <label>房间号<input id="roomId" type="number" /></label>
+        <label>分区ID<input id="areaId" type="number" /></label>
+      </div>
+      <label>标题<input id="roomName" /></label>
+      <label>公告<textarea id="content" rows="4"></textarea></label>
+      <div class="actions">
+        <button id="load">读取房间</button>
+        <button id="areas">读取分区</button>
+        <button id="saveRoom" data-perm="operator,admin">保存房间</button>
+        <button id="saveAnnouncement" data-perm="operator,admin">保存公告</button>
+      </div>
+      <pre id="box">{}</pre>
+    </section>
+  </main>
+
+  <script src="/app/pages/shared.js"></script>
+  <script>
+    const { initPage, requestJSON, showJSON, bindAction } = window.GoverShared;
+    initPage({ active: "room" });
+
+    async function loadRoom() {
+      const result = await requestJSON("/api/v1/room");
+      const item = result.data || {};
+      document.getElementById("roomId").value = item.roomId || "";
+      document.getElementById("areaId").value = item.areaId || "";
+      document.getElementById("roomName").value = item.roomName || "";
+      document.getElementById("content").value = item.content || "";
+      showJSON("box", result);
+    }
+
+    bindAction("load", loadRoom, "box");
+    bindAction("areas", async () => showJSON("box", await requestJSON("/api/v1/room/areas")), "box");
+    bindAction("saveRoom", async () => {
+      const payload = {
+        roomId: Number(document.getElementById("roomId").value || 0),
+        areaId: Number(document.getElementById("areaId").value || 0),
+        roomName: document.getElementById("roomName").value || ""
+      };
+      const result = await requestJSON("/api/v1/room/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      showJSON("box", result);
+    }, "box");
+    bindAction("saveAnnouncement", async () => {
+      const payload = {
+        roomId: Number(document.getElementById("roomId").value || 0),
+        content: document.getElementById("content").value || ""
+      };
+      const result = await requestJSON("/api/v1/room/announcement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      showJSON("box", result);
+    }, "box");
+
+    loadRoom().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
+  </script>
+</body>
+</html>

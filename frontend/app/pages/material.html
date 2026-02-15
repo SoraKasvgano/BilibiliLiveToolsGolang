@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Material 页面（迁移版）</title>
+  <link rel="stylesheet" href="/app/pages/shared.css" />
+</head>
+<body>
+  <header class="shared-header">
+    <div id="sharedNav"></div>
+  </header>
+  <main class="page-shell">
+    <section class="page-card">
+      <h1>Material 页面（迁移版）</h1>
+      <div id="roleTip" class="role-tip"></div>
+      <label>选择素材文件
+        <input id="files" type="file" multiple />
+      </label>
+      <div class="actions">
+        <button id="upload" data-perm="operator,admin">上传素材</button>
+        <button id="list">读取素材列表</button>
+      </div>
+      <pre id="box">[]</pre>
+    </section>
+  </main>
+
+  <script src="/app/pages/shared.js"></script>
+  <script>
+    const { initPage, requestJSON, showJSON, bindAction } = window.GoverShared;
+    initPage({ active: "material" });
+
+    async function listMaterials() {
+      showJSON("box", await requestJSON("/api/v1/materials?page=1&limit=50"));
+    }
+
+    bindAction("upload", async () => {
+      const files = document.getElementById("files").files;
+      if (!files || files.length === 0) throw new Error("请先选择文件");
+      const form = new FormData();
+      for (const file of files) form.append("file", file);
+      const result = await requestJSON("/api/v1/materials/upload", { method: "POST", body: form });
+      showJSON("box", result);
+      await listMaterials();
+    }, "box");
+    bindAction("list", listMaterials, "box");
+
+    listMaterials().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
+  </script>
+</body>
+</html>

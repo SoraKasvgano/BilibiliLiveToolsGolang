@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gover 控制台</title>
+  <link rel="stylesheet" href="/app/styles.css" />
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <h1>Gover 控制台（Go 重写版）</h1>
+      <p>支持 USB 摄像头 / 视频文件 / RTSP / MJPEG 推流，预留弹幕 PTZ 与机器人联动接口。</p>
+      <div class="hero-links">
+        <a href="/swagger/" target="_blank" rel="noopener">离线 Swagger 文档</a>
+        <a href="/openapi.json" target="_blank" rel="noopener">OpenAPI JSON</a>
+        <a href="/app/pages/push.html" target="_blank" rel="noopener">Push 页面(迁移版)</a>
+        <a href="/app/pages/room.html" target="_blank" rel="noopener">Room 页面(迁移版)</a>
+        <a href="/app/pages/material.html" target="_blank" rel="noopener">Material 页面(迁移版)</a>
+        <a href="/app/pages/monitor.html" target="_blank" rel="noopener">Monitor 页面(迁移版)</a>
+        <a href="/legacy/layuiadmin/index.js" target="_blank" rel="noopener">legacy 兼容资源(仅保留兼容)</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="card">
+      <h2>运行配置（配置文件优先）</h2>
+      <label>配置文件路径
+        <input id="runtimeConfigFile" readonly />
+      </label>
+      <div class="grid two">
+        <label>监听地址<input id="cfgListenAddr" value=":18686" /></label>
+        <label>API 前缀<input id="cfgAPIBase" value="/api/v1" /></label>
+      </div>
+      <div class="grid two">
+        <label>跨域允许来源<input id="cfgAllowOrigin" value="*" /></label>
+        <label>日志缓冲条数<input id="cfgLogBufferSize" type="number" value="300" /></label>
+      </div>
+      <div class="grid two">
+        <label>数据目录<input id="cfgDataDir" /></label>
+        <label>数据库路径<input id="cfgDBPath" /></label>
+      </div>
+      <div class="grid two">
+        <label>素材目录<input id="cfgMediaDir" /></label>
+        <label>Debug 日志
+          <select id="cfgEnableDebugLogs">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>FFmpeg 路径<input id="cfgFFmpegPath" /></label>
+        <label>FFprobe 路径<input id="cfgFFprobePath" /></label>
+      </div>
+      <div class="grid two">
+        <label>B站 AppKey<input id="cfgBiliAppKey" /></label>
+        <label>B站 AppSecret<input id="cfgBiliAppSecret" /></label>
+      </div>
+      <div class="grid two">
+        <label>B站平台<input id="cfgBiliPlatform" /></label>
+        <label>B站版本<input id="cfgBiliVersion" /></label>
+      </div>
+      <label>B站 Build<input id="cfgBiliBuild" /></label>
+      <div class="actions">
+        <button id="btnLoadRuntimeConfig">读取配置</button>
+        <button id="btnSaveRuntimeConfig">保存配置并热加载</button>
+        <button id="btnReloadRuntimeConfig">从磁盘重新加载</button>
+      </div>
+      <pre id="configBox">{}</pre>
+    </section>
+
+    <section class="card">
+      <h2>账号与登录</h2>
+      <div class="actions">
+        <button id="btnAccountStatus">刷新登录状态</button>
+        <button id="btnQrStart">生成二维码登录</button>
+        <button id="btnNeedRefresh">检查Cookie刷新需求</button>
+        <button id="btnRefreshCookie">执行Cookie刷新</button>
+      </div>
+      <label>手动 Cookie（明文）
+        <textarea id="cookieContent" rows="3" placeholder="SESSDATA=...; bili_jct=...;"></textarea>
+      </label>
+      <div class="actions">
+        <button id="btnSaveCookie">保存 Cookie</button>
+        <button id="btnLogout" class="danger">登出</button>
+      </div>
+      <label>手动推流地址（调试用）
+        <input id="manualStreamUrl" placeholder="rtmp://..." />
+      </label>
+      <button id="btnSaveStreamUrl">保存手动推流地址</button>
+      <pre id="accountBox">加载中...</pre>
+    </section>
+
+    <section class="card">
+      <h2>直播间配置</h2>
+      <div class="grid two">
+        <label>房间号<input id="roomId" type="number" /></label>
+        <label>分区 ID<input id="roomAreaId" type="number" /></label>
+      </div>
+      <label>直播间标题<input id="roomName" /></label>
+      <div class="actions">
+        <button id="btnLoadRoom">读取配置</button>
+        <button id="btnLoadAreas">读取分区</button>
+        <button id="btnSaveRoom">保存直播间信息</button>
+      </div>
+      <label>直播公告
+        <textarea id="roomContent" rows="3"></textarea>
+      </label>
+      <button id="btnSaveAnnouncement">保存公告</button>
+      <pre id="roomBox">{}</pre>
+    </section>
+
+    <section class="card">
+      <h2>推流配置与控制</h2>
+      <div class="grid two">
+        <label>模式
+          <select id="pushModel">
+            <option value="1">Normal</option>
+            <option value="2">Advance</option>
+          </select>
+        </label>
+        <label>输入类型
+          <select id="pushInputType">
+            <option value="video">视频文件</option>
+            <option value="usb_camera">USB 摄像头</option>
+            <option value="usb_camera_plus">USB 摄像头(高级)</option>
+            <option value="desktop">桌面</option>
+            <option value="rtsp">RTSP</option>
+            <option value="mjpeg">MJPEG</option>
+            <option value="onvif">ONVIF(预留)</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>输出分辨率<input id="pushResolution" value="1280x720" /></label>
+        <label>输出质量
+          <select id="pushQuality">
+            <option value="1">高</option>
+            <option value="2" selected>中</option>
+            <option value="3">低</option>
+            <option value="9">原画</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>RTSP URL<input id="pushRtspUrl" placeholder="rtsp://user:pass@ip/stream" /></label>
+        <label>MJPEG URL<input id="pushMjpegUrl" placeholder="http://ip:port/mjpeg" /></label>
+      </div>
+      <div class="grid two">
+        <label>多路拼屏推流
+          <select id="pushMultiEnabled">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </label>
+        <label>拼屏布局(列x行/聚焦)<input id="pushMultiLayout" value="2x2" placeholder="例如 2x2 / 3x2 / focus" /></label>
+      </div>
+      <label>多路源地址(每行一个 RTSP/MJPEG/HTTP 地址，最多9路)
+        <textarea id="pushMultiUrls" rows="4" placeholder="rtsp://cam1/stream&#10;rtsp://cam2/stream"></textarea>
+      </label>
+      <div class="grid two">
+        <label>新增单路源(URL/本地路径)<input id="mosaicNewSourceUrl" placeholder="rtsp://... 或 C:\\videos\\a.mp4" /></label>
+        <label>新增标题(可选)<input id="mosaicNewSourceTitle" placeholder="主机位" /></label>
+      </div>
+      <div class="actions">
+        <button id="btnAddMosaicSource">添加到拼屏列表</button>
+        <button id="btnSyncMosaicText">同步回文本框</button>
+      </div>
+      <label>素材库多选自动填充(视频)
+        <select id="mosaicMaterialSelect" multiple size="6"></select>
+      </label>
+      <div class="actions">
+        <button id="btnLoadMosaicMaterials">加载素材库</button>
+        <button id="btnAddSelectedMaterials">添加选中素材到拼屏</button>
+      </div>
+      <label>拼屏拖拽排布（拖动排序，设主画面，标题叠加）
+        <div id="mosaicSourceBoard"></div>
+      </label>
+      <div class="actions">
+        <button id="btnPreviewMosaic">预览拼屏布局</button>
+      </div>
+      <pre id="mosaicPreviewBox">[]</pre>
+      <div class="grid two">
+        <label>USB 摄像头名称<input id="pushCameraName" placeholder="HD Pro Webcam C920 或 /dev/video0" /></label>
+        <label>USB 分辨率<input id="pushCameraResolution" value="1280x720" /></label>
+      </div>
+      <label>高级模式 FFmpeg 命令（必须含 {URL}）
+        <textarea id="pushCommand" rows="3" placeholder="ffmpeg ... -f flv {URL}"></textarea>
+      </label>
+      <div class="grid two">
+        <label>自动重试
+          <select id="pushAutoRetry">
+            <option value="true" selected>开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </label>
+        <label>重试间隔(秒)<input id="pushRetryInterval" type="number" value="30" /></label>
+      </div>
+      <div class="actions">
+        <button id="btnLoadPush">读取推流配置</button>
+        <button id="btnSavePush">保存推流配置</button>
+      </div>
+      <div class="actions">
+        <button id="btnStartPush" class="success">开始推流</button>
+        <button id="btnStopPush" class="danger">停止推流</button>
+        <button id="btnRestartPush">重启推流</button>
+        <button id="btnPushStatus">刷新状态</button>
+      </div>
+      <pre id="pushBox">{}</pre>
+    </section>
+
+    <section class="card">
+      <h2>素材管理</h2>
+      <input id="materialUpload" type="file" multiple />
+      <div class="actions">
+        <button id="btnUploadMaterial">上传素材</button>
+        <button id="btnListMaterial">刷新素材列表</button>
+      </div>
+      <pre id="materialBox">[]</pre>
+    </section>
+
+    <section class="card">
+      <h2>扩展集成（明文 API Key / 弹幕 PTZ）</h2>
+      <div class="grid two">
+        <label>API Key 名称<input id="apiKeyName" placeholder="dingtalk / telegram / pushoo / provider_inbound_secret / provider_inbound_whitelist ..." /></label>
+        <label>API Key（明文）<input id="apiKeyValue" /></label>
+      </div>
+      <label>描述<input id="apiKeyDesc" /></label>
+      <div class="actions">
+        <button id="btnSaveApiKey">保存 API Key</button>
+        <button id="btnListApiKey">读取 API Key</button>
+      </div>
+
+      <div class="grid two">
+        <label>弹幕关键词<input id="ruleKeyword" /></label>
+        <label>PTZ 方向<input id="ruleDirection" placeholder="left/right/up/down/center" /></label>
+      </div>
+      <div class="grid two">
+        <label>动作<input id="ruleAction" value="ptz" /></label>
+        <label>速度<input id="ruleSpeed" type="number" value="1" /></label>
+      </div>
+      <div class="actions">
+        <button id="btnSaveRule">保存弹幕规则</button>
+        <button id="btnListRule">读取弹幕规则</button>
+      </div>
+      <div class="grid two">
+        <label>Webhook 名称<input id="webhookName" placeholder="dingtalk-default" /></label>
+        <label>Webhook 地址<input id="webhookUrl" placeholder="https://oapi.dingtalk.com/robot/send?access_token=..." /></label>
+      </div>
+      <div class="grid two">
+        <label>Webhook 密钥<input id="webhookSecret" placeholder="可选，用于签名" /></label>
+        <label>启用状态
+          <select id="webhookEnabled">
+            <option value="true" selected>启用</option>
+            <option value="false">禁用</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>测试 Webhook ID<input id="webhookTestId" type="number" /></label>
+        <label>测试事件类型<input id="webhookEventType" value="webhook.test" /></label>
+      </div>
+      <div class="actions">
+        <button id="btnSaveWebhook">保存 Webhook</button>
+        <button id="btnListWebhook">读取 Webhook</button>
+        <button id="btnTestWebhook">测试指定 Webhook</button>
+        <button id="btnNotifyWebhook">广播通知 Webhook</button>
+        <button id="btnDeliveryLogs">读取推送日志</button>
+      </div>
+      <div class="grid two">
+        <label>ONVIF Endpoint<input id="ptzEndpoint" placeholder="http://192.168.1.10/onvif/device_service" /></label>
+        <label>ONVIF 用户名<input id="ptzUsername" placeholder="admin" /></label>
+      </div>
+      <div class="grid two">
+        <label>ONVIF 密码<input id="ptzPassword" type="password" placeholder="123456" /></label>
+        <label>ProfileToken<input id="ptzProfileToken" placeholder="可选，自动发现" /></label>
+      </div>
+      <div class="grid two">
+        <label>PTZ 动作
+          <select id="ptzAction">
+            <option value="left">left</option>
+            <option value="right">right</option>
+            <option value="up">up</option>
+            <option value="down">down</option>
+            <option value="zoom_in">zoom_in</option>
+            <option value="zoom_out">zoom_out</option>
+            <option value="stop">stop</option>
+            <option value="home">home</option>
+          </select>
+        </label>
+        <label>速度<input id="ptzSpeed" type="number" value="0.3" step="0.1" /></label>
+      </div>
+      <div class="actions">
+        <button id="btnPTZDiscover">自动发现 ONVIF 设备</button>
+        <button id="btnPTZCapabilities">读取 PTZ 能力</button>
+        <button id="btnPTZProfiles">读取 PTZ Profiles</button>
+        <button id="btnPTZCommand">执行 PTZ 命令</button>
+      </div>
+      <label>发现到的 ONVIF 设备
+        <select id="ptzDiscoveredList">
+          <option value="">（点击“自动发现 ONVIF 设备”后可选择）</option>
+        </select>
+      </label>
+      <div class="grid two">
+        <label>Bot Provider<input id="botProvider" value="dingtalk" /></label>
+        <label>Bot Command<input id="botCommand" value="start_live" /></label>
+      </div>
+      <label>Bot Params(JSON)
+        <textarea id="botParams" rows="3" placeholder='{"action":"left","speed":0.3} / {"roomId":123,"message":"测试弹幕","notifyResult":true}'></textarea>
+      </label>
+      <div class="actions">
+        <button id="btnBotCommand">执行机器人命令</button>
+      </div>
+      <pre id="integrationBox">[]</pre>
+    </section>
+
+    <section class="card">
+      <h2>直播数据与容错日志</h2>
+      <div class="grid two">
+        <label>弹幕房间号<input id="danmakuRoomId" type="number" value="0" /></label>
+        <label>弹幕用户ID<input id="danmakuUID" type="number" value="0" /></label>
+      </div>
+      <div class="grid two">
+        <label>弹幕用户名<input id="danmakuUname" value="tester" /></label>
+        <label>弹幕来源<input id="danmakuSource" value="manual" /></label>
+      </div>
+      <label>弹幕内容<input id="danmakuContent" placeholder="例如：向左看" /></label>
+      <div class="actions">
+        <button id="btnDispatchDanmaku">注入并执行弹幕规则</button>
+        <button id="btnListEvents">读取事件</button>
+        <button id="btnListDanmaku">读取弹幕</button>
+        <button id="btnLiveStats">读取统计</button>
+        <button id="btnBiliErrors">Bilibili 错误事件索引</button>
+        <button id="btnBiliErrorLogs">Bilibili 完整错误日志</button>
+        <button id="btnBiliErrorSummary">Bilibili 错误汇总</button>
+        <button id="btnBiliErrorInsights">Bilibili 错误洞察</button>
+      </div>
+      <div class="grid two">
+        <label>错误日志 endpoint 过滤<input id="biliErrorEndpoint" placeholder="可选：按接口地址模糊筛选" /></label>
+        <label>错误日志详情 ID<input id="biliErrorLogId" type="number" value="0" /></label>
+      </div>
+      <div class="actions">
+        <button id="btnBiliErrorLogDetail">按 ID 读取完整详情</button>
+      </div>
+      <div class="grid two">
+        <label>告警窗口(分钟)<input id="biliAlertWindow" type="number" value="10" /></label>
+        <label>触发阈值(错误次数)<input id="biliAlertThreshold" type="number" value="8" /></label>
+      </div>
+      <div class="grid two">
+        <label>冷却时间(分钟)<input id="biliAlertCooldown" type="number" value="15" /></label>
+        <label>告警事件名<input id="biliAlertEventType" value="bilibili.api.alert" /></label>
+      </div>
+      <label>告警开关
+        <select id="biliAlertEnabled">
+          <option value="true" selected>开启</option>
+          <option value="false">关闭</option>
+        </select>
+      </label>
+      <div class="actions">
+        <button id="btnLoadBiliAlertSetting">读取B站告警配置</button>
+        <button id="btnSaveBiliAlertSetting">保存B站告警配置</button>
+        <button id="btnCheckBiliAlert">立即检测并触发告警</button>
+      </div>
+      <h3>实时弹幕消费器（HTTP 轮询 / B站协议）</h3>
+      <div class="grid two">
+        <label>启用状态
+          <select id="consumerEnabled">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </label>
+        <label>Provider
+          <select id="consumerProvider">
+            <option value="http_polling" selected>http_polling（通用HTTP轮询）</option>
+            <option value="bilibili_message_stream">bilibili_message_stream（B站信息流协议）</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>接口地址<input id="consumerEndpoint" placeholder="http://127.0.0.1:19090/api/danmaku/poll" /></label>
+        <label>Auth Token<input id="consumerAuthToken" placeholder="可选，Bearer Token" /></label>
+      </div>
+      <label>Provider 配置(JSON)
+        <textarea id="consumerConfigJson" rows="4" placeholder='{"roomId":123456,"useWbi":true,"useCookie":true,"preferWss":true,"webLocation":"444.8","wsPath":"/sub"}'></textarea>
+      </label>
+      <div class="grid two">
+        <label>轮询间隔(秒)<input id="consumerPollInterval" type="number" value="3" /></label>
+        <label>每批条数<input id="consumerBatchSize" type="number" value="20" /></label>
+      </div>
+      <label>房间过滤(可选，0=不过滤)<input id="consumerRoomIdFilter" type="number" value="0" /></label>
+      <div class="actions">
+        <button id="btnLoadConsumerSetting">读取消费器配置</button>
+        <button id="btnSaveConsumerSetting">保存消费器配置</button>
+        <button id="btnConsumerStatus">读取消费器状态</button>
+        <button id="btnConsumerPollOnce">立即轮询一次</button>
+      </div>
+      <h3>异步任务队列（Webhook/Bot）</h3>
+      <div class="grid two">
+        <label>任务状态过滤
+          <select id="integrationTaskStatus">
+            <option value="">全部</option>
+            <option value="pending">pending</option>
+            <option value="running">running</option>
+            <option value="succeeded">succeeded</option>
+            <option value="dead">dead</option>
+            <option value="cancelled">cancelled</option>
+          </select>
+        </label>
+        <label>任务类型过滤
+          <select id="integrationTaskType">
+            <option value="">全部</option>
+            <option value="webhook">webhook</option>
+            <option value="bot">bot</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>重试任务ID<input id="integrationTaskRetryId" type="number" value="0" /></label>
+        <label>高级统计窗口(小时)<input id="advancedStatsHours" type="number" value="24" /></label>
+      </div>
+      <div class="grid two">
+        <label>图表时间粒度
+          <select id="advancedStatsGranularity">
+            <option value="hour" selected>hour（按小时）</option>
+            <option value="day">day（按天）</option>
+          </select>
+        </label>
+        <label>导出字段模板
+          <select id="advancedExportPreset">
+            <option value="all" selected>all（全部）</option>
+            <option value="basic">basic（基础）</option>
+            <option value="ops">ops（运维）</option>
+            <option value="alerts">alerts（告警）</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>导出字段(逗号分隔，留空=all)
+          <input id="advancedExportFields" value="all" placeholder="all 或 hourlyEvents,eventTypeTop,alertTrend,keywordStats,queueSummary" />
+        </label>
+        <label>导出数组行数上限(maxRows)
+          <input id="advancedExportMaxRows" type="number" value="300" />
+        </label>
+      </div>
+      <div class="grid two">
+        <label>取消任务ID<input id="integrationTaskCancelId" type="number" value="0" /></label>
+        <label>优先级调整(与任务ID配合)<input id="integrationTaskPriority" type="number" value="100" /></label>
+      </div>
+      <div class="grid two">
+        <label>批量重试条数<input id="integrationTaskBatchLimit" type="number" value="200" /></label>
+        <label>批量重试状态(默认死信+取消)
+          <select id="integrationTaskBatchStatus">
+            <option value="">dead + cancelled</option>
+            <option value="dead">dead</option>
+            <option value="cancelled">cancelled</option>
+          </select>
+        </label>
+      </div>
+      <h3>任务队列速率设置</h3>
+      <div class="grid two">
+        <label>Webhook 速率间隔(ms)<input id="queueWebhookGapMs" type="number" value="300" /></label>
+        <label>Bot 速率间隔(ms)<input id="queueBotGapMs" type="number" value="300" /></label>
+      </div>
+      <div class="grid two">
+        <label>Worker 数量(重启后应用)<input id="queueMaxWorkers" type="number" value="3" /></label>
+        <label>租约轮询间隔(ms)<input id="queueLeaseIntervalMs" type="number" value="500" /></label>
+      </div>
+      <div class="actions">
+        <button id="btnListIntegrationTasks">读取任务列表</button>
+        <button id="btnIntegrationTaskSummary">读取任务汇总</button>
+        <button id="btnRetryIntegrationTask">重试死信任务</button>
+        <button id="btnRetryIntegrationTaskBatch">批量重试任务</button>
+        <button id="btnCancelIntegrationTask">取消任务</button>
+        <button id="btnUpdateIntegrationTaskPriority">更新任务优先级</button>
+        <button id="btnLoadQueueSetting">读取队列设置</button>
+        <button id="btnSaveQueueSetting">保存队列设置</button>
+        <button id="btnLiveAdvancedStats">读取高级统计</button>
+        <button id="btnExportAdvancedStatsCsv">导出统计CSV</button>
+        <button id="btnExportAdvancedStatsJson">导出统计JSON</button>
+      </div>
+      <canvas id="advancedStatsChart" width="980" height="300"></canvas>
+      <canvas id="eventTopChart" width="980" height="280"></canvas>
+      <canvas id="alertTrendChart" width="980" height="260"></canvas>
+      <h3>高级功能开关与内存巡检</h3>
+      <div class="grid two">
+        <label>简化模式（关闭全部高级功能）
+          <select id="featureSimpleMode">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </label>
+        <label>任务队列
+          <select id="featureTaskQueue">
+            <option value="true" selected>开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>Webhook
+          <select id="featureWebhook">
+            <option value="true" selected>开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </label>
+        <label>Bot
+          <select id="featureBot">
+            <option value="true" selected>开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>弹幕实时消费器
+          <select id="featureDanmakuConsumer">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </label>
+        <label>高级统计
+          <select id="featureAdvancedStats">
+            <option value="true" selected>开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </label>
+      </div>
+      <div class="actions">
+        <button id="btnLoadIntegrationFeatures">读取功能开关</button>
+        <button id="btnSaveIntegrationFeatures">保存功能开关</button>
+        <button id="btnRuntimeMemory">读取内存状态</button>
+        <button id="btnRuntimeGC">立即执行GC</button>
+      </div>
+      <pre id="liveDataBox">[]</pre>
+    </section>
+
+    <section class="card">
+      <h2>FFmpeg 日志</h2>
+      <div class="actions">
+        <button id="btnLoadLogs">刷新日志</button>
+      </div>
+      <pre id="logBox">[]</pre>
+    </section>
+
+    <section class="card">
+      <h2>数据库维护与压缩</h2>
+      <div class="grid two">
+        <label>自动清理
+          <select id="maintenanceEnabled">
+            <option value="true" selected>开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </label>
+        <label>保留天数<input id="maintenanceDays" type="number" value="7" /></label>
+      </div>
+      <div class="grid two">
+        <label>自动清理后压缩数据库
+          <select id="maintenanceAutoVacuum">
+            <option value="true" selected>开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </label>
+        <label>立即清理天数<input id="maintenanceNowDays" type="number" value="7" /></label>
+      </div>
+      <div class="actions">
+        <button id="btnLoadMaintenance">读取维护设置</button>
+        <button id="btnSaveMaintenance">保存维护设置</button>
+        <button id="btnMaintenanceStatus">读取维护状态</button>
+      </div>
+      <div class="grid two">
+        <label>历史筛选-类型
+          <select id="maintenanceHistoryType">
+            <option value="">全部</option>
+            <option value="cleanup">cleanup</option>
+            <option value="vacuum">vacuum</option>
+          </select>
+        </label>
+        <label>历史筛选-状态
+          <select id="maintenanceHistoryState">
+            <option value="">全部</option>
+            <option value="succeeded">succeeded</option>
+            <option value="failed">failed</option>
+            <option value="cancelled">cancelled</option>
+            <option value="running">running</option>
+          </select>
+        </label>
+      </div>
+      <label>历史条数<input id="maintenanceHistoryLimit" type="number" value="20" /></label>
+      <div class="actions">
+        <button id="btnCleanupNow">立即清理历史数据</button>
+        <button id="btnVacuumNow">立即压缩数据库</button>
+        <button id="btnCancelMaintenance">取消当前任务</button>
+      </div>
+      <pre id="maintenanceBox">[]</pre>
+    </section>
+  </main>
+
+  <script src="/app/app.js"></script>
+</body>
+</html>
