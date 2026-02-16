@@ -266,11 +266,22 @@ func (m *Manager) Stop(ctx context.Context) error {
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(500 * time.Millisecond):
-		return nil
+	// Wait until runLoop goroutine actually exits.
+	deadline := time.After(5 * time.Second)
+	for {
+		m.mu.RLock()
+		still := m.running
+		m.mu.RUnlock()
+		if !still {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return nil
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 }
 
@@ -291,7 +302,10 @@ func (m *Manager) Logs() []store.FFmpegLogItem {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	result := make([]store.FFmpegLogItem, len(m.logs))
-	copy(result, m.logs)
+	// Return in reverse order (newest first) since we append to end.
+	for i, j := 0, len(m.logs)-1; j >= 0; i, j = i+1, j-1 {
+		result[i] = m.logs[j]
+	}
 	return result
 }
 
@@ -308,9 +322,9 @@ func (m *Manager) addLog(logType string, message string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry := store.FFmpegLogItem{LogType: logType, Time: time.Now(), Message: message}
-	m.logs = append([]store.FFmpegLogItem{entry}, m.logs...)
+	m.logs = append(m.logs, entry)
 	if len(m.logs) > m.logBuffer {
-		m.logs = m.logs[:m.logBuffer]
+		m.logs = m.logs[len(m.logs)-m.logBuffer:]
 	}
 	if m.debugLogs {
 		log.Printf("[ffmpeg][%s] %s", strings.ToLower(strings.TrimSpace(logType)), message)

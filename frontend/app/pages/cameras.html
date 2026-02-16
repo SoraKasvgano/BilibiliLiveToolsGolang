@@ -87,14 +87,14 @@
         </label>
       </div>
 
-      <div id="panelMJPEG" class="soft-panel" style="display:none;">
+      <div id="panelMJPEG" class="soft-panel panel-hidden">
         <h3>MJPEG 配置</h3>
         <label>MJPEG 地址
           <input id="cameraMjpegUrl" placeholder="http://ip:port/mjpeg" />
         </label>
       </div>
 
-      <div id="panelONVIF" class="soft-panel" style="display:none;">
+      <div id="panelONVIF" class="soft-panel panel-hidden">
         <h3>ONVIF 配置（每台设备可独立用户名/密码）</h3>
         <div class="grid two">
           <label>ONVIF Endpoint
@@ -117,7 +117,7 @@
         </label>
       </div>
 
-      <div id="panelUSB" class="soft-panel" style="display:none;">
+      <div id="panelUSB" class="soft-panel panel-hidden">
         <h3>USB 摄像头配置</h3>
         <div class="grid two">
           <label>设备名
@@ -433,6 +433,7 @@
         fillForm(result.data);
         setStepState(1, true);
         setStepState(2, true);
+        setTimeout(() => { flashCameraId = 0; }, 1500);
       }
       await loadList();
     }

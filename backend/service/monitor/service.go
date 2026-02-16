@@ -66,9 +66,9 @@ func (s *Service) logf(level string, format string, args ...any) {
 		Message: strings.TrimSpace(message),
 	}
 	s.mu.Lock()
-	s.logs = append([]RuntimeLog{entry}, s.logs...)
+	s.logs = append(s.logs, entry)
 	if len(s.logs) > s.buffer {
-		s.logs = s.logs[:s.buffer]
+		s.logs = s.logs[len(s.logs)-s.buffer:]
 	}
 	s.mu.Unlock()
 
@@ -91,11 +91,15 @@ func (s *Service) Logs(limit int) []RuntimeLog {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if len(s.logs) < limit {
-		limit = len(s.logs)
+	n := len(s.logs)
+	if n < limit {
+		limit = n
 	}
 	result := make([]RuntimeLog, limit)
-	copy(result, s.logs[:limit])
+	// Return in reverse order (newest first) since we append to end.
+	for i := 0; i < limit; i++ {
+		result[i] = s.logs[n-1-i]
+	}
 	return result
 }
 

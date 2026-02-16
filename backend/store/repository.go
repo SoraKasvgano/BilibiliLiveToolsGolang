@@ -1067,7 +1067,10 @@ func (s *Store) batchDeleteBefore(ctx context.Context, table string, timeColumn 
 		if err != nil {
 			return total, err
 		}
-		affected, _ := result.RowsAffected()
+		affected, affErr := result.RowsAffected()
+		if affErr != nil {
+			return total, affErr
+		}
 		total += affected
 		if affected < int64(batchSize) {
 			break
@@ -1534,7 +1537,7 @@ func (s *Store) DeleteCameraSources(ctx context.Context, ids []int64) (int64, er
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return 0, nil
+		return 0, err
 	}
 	return affected, nil
 }

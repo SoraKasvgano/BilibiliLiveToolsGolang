@@ -524,6 +524,8 @@ pre {
   border-radius: 8px;
   background: #0f172a;
   color: #dbeafe;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", "Monaco", monospace;
+  font-size: 13px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;

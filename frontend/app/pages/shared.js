@@ -263,10 +263,10 @@
       return;
     }
     if (button.dataset.loading !== "1") return;
-    button.disabled = false;
     button.classList.remove("btn-loading");
     button.innerHTML = button.dataset.originHtml || button.textContent || "";
     button.dataset.loading = "0";
+    button.disabled = button.dataset.disabledByRole === "1";
   }
 
   function normalizeSuccessMessage(result, options, button) {

@@ -116,6 +116,12 @@
       return statusBadge("INFO", "info");
     }
 
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
     function renderLogs(items) {
       const rows = Array.isArray(items) ? items : [];
       const body = document.querySelector("#monitorLogTable tbody");
@@ -127,10 +133,11 @@
       document.getElementById("monitorLogEmpty").style.display = "none";
       for (const item of rows) {
         const tr = document.createElement("tr");
+        const safeMessage = escapeHtml(item.message || "");
         tr.innerHTML = `
           <td>${levelBadge(item.level)}</td>
-          <td>${item.time || ""}</td>
-          <td title="${item.message || ""}">${item.message || ""}</td>
+          <td>${escapeHtml(item.time || "")}</td>
+          <td title="${safeMessage}">${safeMessage}</td>
         `;
         body.appendChild(tr);
       }

@@ -62,7 +62,8 @@
     }
 
     function renderMaterials(pageResult) {
-      const rows = ((pageResult || {}).data) || [];
+      const raw = (pageResult || {});
+      const rows = Array.isArray(raw) ? raw : (Array.isArray(raw.data) ? raw.data : []);
       const body = document.querySelector("#materialTable tbody");
       body.innerHTML = "";
       if (!rows.length) {

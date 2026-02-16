@@ -58,6 +58,7 @@
     const autoCloseEnabled = popupParams.get("autoclose") === "1";
     let qrMaxAge = 180;
     let loginCompleted = false;
+    let poller = null;
 
     function setStatusBadge(text, type) {
       const old = document.getElementById("loginStatusBadge");
@@ -110,6 +111,7 @@
     function handleLoginSuccess(data) {
       if (loginCompleted) return;
       loginCompleted = true;
+      poller.stop();
       setStatusBadge("已登录", "success");
       setProgress(0);
       showToast("扫码登录成功，Cookie 已同步", "success");
@@ -190,7 +192,7 @@
       return { code: 0, message: "正在返回功能首页..." };
     }, "loginBox");
 
-    const poller = createPoller(refreshStatus, 1200);
+    poller = createPoller(refreshStatus, 1200);
     poller.start();
     generateQRCode().catch((error) => {
       showJSON("loginBox", { code: -1, message: error.message || String(error) });
