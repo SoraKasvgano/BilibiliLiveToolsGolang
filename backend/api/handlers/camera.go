@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,6 +11,7 @@ import (
 
 	"bilibililivetools/gover/backend/httpapi"
 	"bilibililivetools/gover/backend/router"
+	streamsvc "bilibililivetools/gover/backend/service/stream"
 	"bilibililivetools/gover/backend/store"
 )
 
@@ -33,6 +36,7 @@ func (m *cameraModule) Routes() []router.Route {
 		{Method: http.MethodPost, Pattern: "/save", Summary: "Create or update camera source", Handler: m.save},
 		{Method: http.MethodPost, Pattern: "/delete", Summary: "Delete camera sources", Handler: m.delete},
 		{Method: http.MethodPost, Pattern: "/{id}/apply-push", Summary: "Apply camera source to push setting", Handler: m.applyPush},
+		{Method: http.MethodGet, Pattern: "/{id}/preview/mjpeg", Summary: "Preview selected camera source as MJPEG stream", Handler: m.preview},
 	}
 }
 
@@ -199,6 +203,82 @@ func (m *cameraModule) applyPush(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (m *cameraModule) preview(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		httpapi.Error(w, -1, "invalid camera source id", http.StatusBadRequest)
+		return
+	}
+	camera, err := m.deps.Store.GetCameraSourceByID(r.Context(), id)
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	setting, err := buildCameraPreviewSetting(camera)
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	command, args, err := streamsvc.BuildPreviewCommand(streamsvc.BuildContext{
+		Setting:    setting,
+		MediaDir:   m.deps.Config.MediaDir,
+		FFmpegPath: m.deps.FFmpeg.BinaryPath(),
+	}, previewOptionsFromRequest(r))
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	if err := streamPreviewCommand(w, r, command, args, previewDebugEnabled(m.deps)); err != nil && r.Context().Err() == nil {
+		log.Printf("[preview][camera:%d] stream failed: %v", id, err)
+	}
+}
+
+func buildCameraPreviewSetting(camera *store.CameraSource) (*store.PushSetting, error) {
+	if camera == nil {
+		return nil, errors.New("camera source is required")
+	}
+	setting := &store.PushSetting{
+		InputType:             store.InputTypeRTSP,
+		OutputResolution:      "1280x720",
+		InputDeviceResolution: camera.USBDeviceResolution,
+		InputDeviceFramerate:  camera.USBDeviceFramerate,
+		RTSPURL:               strings.TrimSpace(camera.RTSPURL),
+		MJPEGURL:              strings.TrimSpace(camera.MJPEGURL),
+	}
+	switch camera.SourceType {
+	case store.CameraSourceTypeRTSP:
+		setting.InputType = store.InputTypeRTSP
+		if setting.RTSPURL == "" {
+			return nil, errors.New("rtsp url is required for preview")
+		}
+	case store.CameraSourceTypeMJPEG:
+		setting.InputType = store.InputTypeMJPEG
+		if setting.MJPEGURL == "" {
+			return nil, errors.New("mjpeg url is required for preview")
+		}
+	case store.CameraSourceTypeONVIF:
+		setting.InputType = store.InputTypeONVIF
+		if setting.RTSPURL == "" {
+			return nil, errors.New("onvif preview requires resolved rtsp url")
+		}
+	case store.CameraSourceTypeUSB:
+		setting.InputType = store.InputTypeUSBCamera
+		setting.InputDeviceName = strings.TrimSpace(camera.USBDeviceName)
+		if setting.InputDeviceResolution == "" {
+			setting.InputDeviceResolution = "1280x720"
+		}
+		if setting.InputDeviceFramerate <= 0 {
+			setting.InputDeviceFramerate = 30
+		}
+		if setting.InputDeviceName == "" {
+			return nil, errors.New("usb device name is required for preview")
+		}
+	default:
+		return nil, errors.New("unsupported camera type")
+	}
+	return setting, nil
+}
+
 func buildPushUpdateRequest(item *store.PushSetting) store.PushSettingUpdateRequest {
 	req := store.PushSettingUpdateRequest{
 		Model:                 item.Model,
@@ -208,6 +288,7 @@ func buildPushUpdateRequest(item *store.PushSetting) store.PushSettingUpdateRequ
 		InputType:             string(item.InputType),
 		OutputResolution:      item.OutputResolution,
 		OutputQuality:         item.OutputQuality,
+		OutputBitrateKbps:     item.OutputBitrateKbps,
 		CustomOutputParams:    item.CustomOutputParams,
 		CustomVideoCodec:      item.CustomVideoCodec,
 		IsMute:                item.IsMute,

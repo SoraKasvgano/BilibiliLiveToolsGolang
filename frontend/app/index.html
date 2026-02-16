@@ -152,6 +152,23 @@
         </label>
       </div>
       <div class="grid two">
+        <label>推流码率预设
+          <select id="pushBitratePreset">
+            <option value="auto" selected>自动（跟随质量档位）</option>
+            <option value="2000">流畅 2000 kbps</option>
+            <option value="3500">标准 3500 kbps</option>
+            <option value="5000">高清 5000 kbps</option>
+            <option value="8000">超清 8000 kbps</option>
+            <option value="12000">蓝光 12000 kbps</option>
+            <option value="custom">自定义</option>
+          </select>
+        </label>
+        <label id="pushBitrateCustomWrap" style="display:none;">自定义码率（kbps）
+          <input id="pushBitrateCustom" type="number" value="4500" min="500" max="120000" />
+        </label>
+      </div>
+      <p class="muted">建议先用 3500~5000 kbps；若观众端出现缓冲可快速切换到 2000 kbps。</p>
+      <div class="grid two">
         <label>RTSP URL<input id="pushRtspUrl" placeholder="rtsp://user:pass@ip/stream" /></label>
         <label>MJPEG URL<input id="pushMjpegUrl" placeholder="http://ip:port/mjpeg" /></label>
       </div>
@@ -205,8 +222,18 @@
       <label>拼屏拖拽排布（拖动排序，设主画面，标题叠加）
         <div id="mosaicSourceBoard"></div>
       </label>
+      <div class="grid two">
+        <label>本地预览宽度（px）<input id="mosaicLocalPreviewWidth" type="number" value="960" /></label>
+        <label>本地预览帧率（fps）<input id="mosaicLocalPreviewFps" type="number" value="10" /></label>
+      </div>
       <div class="actions">
         <button id="btnPreviewMosaic">预览拼屏布局</button>
+        <button id="btnStartMosaicLocalPreview">开启本地预览</button>
+        <button id="btnStopMosaicLocalPreview">关闭本地预览</button>
+      </div>
+      <div class="preview-panel">
+        <img id="mosaicLocalPreviewImage" alt="拼屏本地预览画面" />
+        <div id="mosaicLocalPreviewInfo" class="muted">本地预览默认关闭，点击“开启本地预览”后按当前配置拉流并显示。</div>
       </div>
       <pre id="mosaicPreviewBox">[]</pre>
       <div class="grid two">

@@ -124,6 +124,27 @@
         <button id="btnCameraDelete">删除当前</button>
         <button id="btnCameraApplyPush">一键套用到推流配置</button>
       </div>
+
+      <div class="soft-panel">
+        <h3>按需画面预览（节省资源）</h3>
+        <p class="soft-note">仅在你点击“开启预览”时才会占用资源；关闭预览会立即断开。</p>
+        <div class="grid two">
+          <label>预览宽度（px）
+            <input id="cameraPreviewWidth" type="number" value="640" min="240" max="1920" />
+          </label>
+          <label>预览帧率（fps）
+            <input id="cameraPreviewFps" type="number" value="8" min="1" max="20" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnCameraPreviewStart">开启预览</button>
+          <button id="btnCameraPreviewStop">关闭预览</button>
+        </div>
+        <div class="preview-panel">
+          <img id="cameraPreviewImage" alt="摄像头预览画面" />
+          <div id="cameraPreviewInfo" class="soft-note">请先从下方列表选择已保存的摄像头，再开启预览。</div>
+        </div>
+      </div>
     </section>
 
     <section class="page-card">
@@ -180,6 +201,7 @@
     initPage({ active: "cameras" });
 
     const rowsCache = new Map();
+    let cameraPreviewRunning = false;
 
     function boolValue(id) {
       return String(document.getElementById(id).value || "").toLowerCase() === "true";
@@ -257,6 +279,7 @@
     }
 
     function resetForm(type) {
+      stopCameraPreview();
       fillForm({
         id: 0,
         sourceType: type || textValue("cameraType") || "rtsp",
@@ -289,9 +312,43 @@
         btn.onclick = () => {
           const id = Number(btn.getAttribute("data-id"));
           const item = rowsCache.get(id);
+          stopCameraPreview();
           fillForm(item || {});
         };
       });
+    }
+
+    function setPreviewInfo(text) {
+      document.getElementById("cameraPreviewInfo").textContent = text || "";
+    }
+
+    function stopCameraPreview() {
+      const img = document.getElementById("cameraPreviewImage");
+      if (!img) return;
+      cameraPreviewRunning = false;
+      img.style.display = "none";
+      img.src = "";
+      setPreviewInfo("预览已关闭。");
+    }
+
+    function startCameraPreview() {
+      const id = numberValue("cameraId", 0);
+      if (!id) throw new Error("请先在列表选择一个已保存摄像头，再开启预览");
+      const width = Math.max(240, Math.min(1920, numberValue("cameraPreviewWidth", 640)));
+      const fps = Math.max(1, Math.min(20, numberValue("cameraPreviewFps", 8)));
+      const img = document.getElementById("cameraPreviewImage");
+      cameraPreviewRunning = true;
+      img.style.display = "block";
+      img.onerror = () => {
+        if (!cameraPreviewRunning) return;
+        setPreviewInfo("预览连接失败，请检查地址/账号密码/网络后重试。");
+      };
+      img.onload = () => {
+        if (!cameraPreviewRunning) return;
+        setPreviewInfo("预览中（关闭后立即释放资源）");
+      };
+      img.src = `/api/v1/cameras/${id}/preview/mjpeg?width=${width}&fps=${fps}&_ts=${Date.now()}`;
+      setPreviewInfo("正在建立预览连接...");
     }
 
     async function loadList() {
@@ -430,6 +487,14 @@
     bindAction("btnCameraNew", async () => {
       resetForm("rtsp");
       showJSON("cameraBox", { code: 0, message: "已重置表单，可新建摄像头", data: {} });
+    }, "cameraBox");
+    bindAction("btnCameraPreviewStart", async () => {
+      startCameraPreview();
+      showJSON("cameraBox", { code: 0, message: "已开启预览" });
+    }, "cameraBox");
+    bindAction("btnCameraPreviewStop", async () => {
+      stopCameraPreview();
+      showJSON("cameraBox", { code: 0, message: "已关闭预览" });
     }, "cameraBox");
 
     resetForm("rtsp");

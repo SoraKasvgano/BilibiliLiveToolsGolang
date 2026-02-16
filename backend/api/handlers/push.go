@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"time"
 
 	"bilibililivetools/gover/backend/httpapi"
 	"bilibililivetools/gover/backend/router"
+	streamsvc "bilibililivetools/gover/backend/service/stream"
 	"bilibililivetools/gover/backend/store"
 )
 
@@ -32,6 +34,7 @@ func (m *pushModule) Routes() []router.Route {
 		{Method: http.MethodPost, Pattern: "/stop", Summary: "Stop push stream", Handler: m.stop},
 		{Method: http.MethodPost, Pattern: "/restart", Summary: "Restart push stream", Handler: m.restart},
 		{Method: http.MethodGet, Pattern: "/status", Summary: "Get push status", Handler: m.status},
+		{Method: http.MethodGet, Pattern: "/preview/mjpeg", Summary: "Preview current push source as MJPEG stream", Handler: m.preview},
 		{Method: http.MethodGet, Pattern: "/devices", Summary: "List available ffmpeg devices", Handler: m.devices},
 		{Method: http.MethodGet, Pattern: "/codecs", Summary: "List available codecs", Handler: m.codecs},
 		{Method: http.MethodGet, Pattern: "/version", Summary: "Get ffmpeg version", Handler: m.version},
@@ -98,6 +101,35 @@ func (m *pushModule) restart(w http.ResponseWriter, r *http.Request) {
 
 func (m *pushModule) status(w http.ResponseWriter, r *http.Request) {
 	httpapi.OK(w, store.PushStatusResponse{Status: m.deps.Stream.Status()})
+}
+
+func (m *pushModule) preview(w http.ResponseWriter, r *http.Request) {
+	setting, err := m.deps.Store.GetPushSetting(r.Context())
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	var videoMaterial *store.Material
+	if setting.VideoMaterialID != nil && *setting.VideoMaterialID > 0 {
+		videoMaterial, err = m.deps.Store.GetMaterialByID(r.Context(), *setting.VideoMaterialID)
+		if err != nil {
+			httpapi.Error(w, -1, "video material not found: "+err.Error(), http.StatusOK)
+			return
+		}
+	}
+	command, args, err := streamsvc.BuildPreviewCommand(streamsvc.BuildContext{
+		Setting:       setting,
+		MediaDir:      m.deps.Config.MediaDir,
+		VideoMaterial: videoMaterial,
+		FFmpegPath:    m.deps.FFmpeg.BinaryPath(),
+	}, previewOptionsFromRequest(r))
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	if err := streamPreviewCommand(w, r, command, args, previewDebugEnabled(m.deps)); err != nil && r.Context().Err() == nil {
+		log.Printf("[preview][push] stream failed: %v", err)
+	}
 }
 
 func (m *pushModule) devices(w http.ResponseWriter, r *http.Request) {

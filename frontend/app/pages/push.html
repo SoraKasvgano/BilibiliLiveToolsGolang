@@ -74,6 +74,23 @@
         </label>
       </div>
       <div class="grid two">
+        <label>推流码率预设
+          <select id="bitratePreset">
+            <option value="auto" selected>自动（跟随质量档位）</option>
+            <option value="2000">流畅 2000 kbps</option>
+            <option value="3500">标准 3500 kbps</option>
+            <option value="5000">高清 5000 kbps</option>
+            <option value="8000">超清 8000 kbps</option>
+            <option value="12000">蓝光 12000 kbps</option>
+            <option value="custom">自定义</option>
+          </select>
+        </label>
+        <label id="bitrateCustomWrap" style="display:none;">自定义码率（kbps）
+          <input id="bitrateCustom" type="number" value="4500" min="500" max="120000" />
+        </label>
+      </div>
+      <p class="soft-note">建议先用 3500~5000 kbps；网络不稳时可降到 2000 kbps，避免观众端缓冲卡顿。</p>
+      <div class="grid two">
         <label>自动重试
           <select id="autoRetry">
             <option value="true" selected>开启</option>
@@ -155,6 +172,46 @@
 
     function asBool(id) {
       return String(document.getElementById(id).value || "").toLowerCase() === "true";
+    }
+
+    function normalizeBitrateKbps(value) {
+      const num = Number(value || 0);
+      if (!Number.isFinite(num) || num <= 0) return 0;
+      if (num > 120000) return 120000;
+      return Math.round(num);
+    }
+
+    function syncBitrateCustomVisibility() {
+      const preset = asText("bitratePreset");
+      const wrap = document.getElementById("bitrateCustomWrap");
+      wrap.style.display = preset === "custom" ? "" : "none";
+    }
+
+    function applyBitratePresetFromValue(value) {
+      const normalized = normalizeBitrateKbps(value);
+      const presetEl = document.getElementById("bitratePreset");
+      const customEl = document.getElementById("bitrateCustom");
+      if (!normalized) {
+        presetEl.value = "auto";
+      } else if (["2000", "3500", "5000", "8000", "12000"].includes(String(normalized))) {
+        presetEl.value = String(normalized);
+      } else {
+        presetEl.value = "custom";
+        customEl.value = String(normalized);
+      }
+      if (!customEl.value) {
+        customEl.value = "4500";
+      }
+      syncBitrateCustomVisibility();
+    }
+
+    function currentBitrateKbps() {
+      const preset = asText("bitratePreset");
+      if (preset === "auto") return 0;
+      if (preset === "custom") {
+        return normalizeBitrateKbps(asNumber("bitrateCustom", 4500));
+      }
+      return normalizeBitrateKbps(preset);
     }
 
     function switchInputPanels() {
@@ -285,6 +342,7 @@
       document.getElementById("inputType").value = data.inputType || "video";
       document.getElementById("resolution").value = data.outputResolution || "1280x720";
       document.getElementById("quality").value = String(data.outputQuality || 2);
+      applyBitratePresetFromValue(data.outputBitrateKbps || 0);
       document.getElementById("autoRetry").value = data.isAutoRetry ? "true" : "false";
       document.getElementById("retryInterval").value = String(data.retryInterval || 30);
       document.getElementById("ffmpegCommand").value = data.ffmpegCommand || "";
@@ -315,6 +373,7 @@
         inputType,
         outputResolution: asText("resolution") || "1280x720",
         outputQuality: asNumber("quality", 2),
+        outputBitrateKbps: currentBitrateKbps(),
         isAutoRetry: asBool("autoRetry"),
         retryInterval: asNumber("retryInterval", 30),
         ffmpegCommand: document.getElementById("ffmpegCommand").value || "",
@@ -348,6 +407,7 @@
       autoSuggestAdvancedCommand();
     };
     document.getElementById("model").onchange = autoSuggestAdvancedCommand;
+    document.getElementById("bitratePreset").onchange = syncBitrateCustomVisibility;
     document.getElementById("cameraFilterType").onchange = () => loadCameras().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
 
     bindAction("load", loadSetting, "box");
@@ -367,6 +427,7 @@
     }, "box");
 
     switchInputPanels();
+    applyBitratePresetFromValue(0);
     loadSetting().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
     loadCameras().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
   </script>

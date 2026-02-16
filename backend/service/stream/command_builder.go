@@ -74,14 +74,20 @@ func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 				targetQuality = store.OutputQualityMedium
 			}
 			quality := qualityPreset(targetQuality)
+			bitrate := quality.Bitrate
+			bufSize := quality.BufSize
+			if customBitrate := normalizeBitrateKbps(ctx.Setting.OutputBitrateKbps); customBitrate > 0 {
+				bitrate = fmt.Sprintf("%dk", customBitrate)
+				bufSize = fmt.Sprintf("%dk", customBitrate*2)
+			}
 			args = append(args,
 				"-vcodec", codec,
 				"-pix_fmt", "yuv420p",
 				"-r", "30",
 				"-g", "30",
-				"-b:v", quality.Bitrate,
-				"-maxrate", quality.Bitrate,
-				"-bufsize", quality.BufSize,
+				"-b:v", bitrate,
+				"-maxrate", bitrate,
+				"-bufsize", bufSize,
 				"-preset", quality.Preset,
 				"-crf", quality.CRF,
 				"-tune", "zerolatency",
@@ -246,6 +252,16 @@ func qualityPreset(level store.OutputQuality) quality {
 	default:
 		return quality{Bitrate: "4000k", BufSize: "8000k", Preset: "veryfast", CRF: "28"}
 	}
+}
+
+func normalizeBitrateKbps(value int) int {
+	if value <= 0 {
+		return 0
+	}
+	if value > 120000 {
+		return 120000
+	}
+	return value
 }
 
 func splitCommandLine(command string) ([]string, error) {

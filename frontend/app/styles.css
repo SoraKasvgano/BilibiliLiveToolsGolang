@@ -159,6 +159,28 @@ pre {
   line-height: 1.4;
 }
 
+.preview-panel {
+  margin-top: 8px;
+  border: 1px dashed #90a4c8;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fbff;
+}
+
+#mosaicLocalPreviewImage {
+  width: 100%;
+  max-height: 460px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid #d6e0f2;
+  background: #0f172a;
+  display: none;
+}
+
+#mosaicLocalPreviewInfo {
+  margin-top: 8px;
+}
+
 #mosaicSourceBoard {
   margin-top: 6px;
   padding: 10px;

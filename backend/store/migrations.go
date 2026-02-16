@@ -36,6 +36,7 @@ var schemaStatements = []string{
 		input_type TEXT NOT NULL DEFAULT 'video',
 		output_resolution TEXT NOT NULL DEFAULT '1280x720',
 		output_quality INTEGER NOT NULL DEFAULT 2,
+		output_bitrate_kbps INTEGER NOT NULL DEFAULT 0,
 		custom_output_params TEXT NOT NULL DEFAULT '',
 		custom_video_codec TEXT NOT NULL DEFAULT '',
 		video_material_id INTEGER NULL,

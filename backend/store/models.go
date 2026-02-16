@@ -106,6 +106,7 @@ type PushSetting struct {
 	InputType             InputType          `json:"inputType"`
 	OutputResolution      string             `json:"outputResolution"`
 	OutputQuality         OutputQuality      `json:"outputQuality"`
+	OutputBitrateKbps     int                `json:"outputBitrateKbps"`
 	CustomOutputParams    string             `json:"custumOutputParams"`
 	CustomVideoCodec      string             `json:"custumVideoCodec"`
 	VideoMaterialID       *int64             `json:"videoId"`
@@ -141,6 +142,7 @@ type PushSettingUpdateRequest struct {
 	LegacyInputType        int                `json:"legacyInputType"`
 	OutputResolution       string             `json:"outputResolution"`
 	OutputQuality          OutputQuality      `json:"outputQuality"`
+	OutputBitrateKbps      int                `json:"outputBitrateKbps"`
 	CustomOutputParams     string             `json:"custumOutputParams"`
 	CustomVideoCodec       string             `json:"custumVideoCodec"`
 	VideoID                int64              `json:"videoId"`

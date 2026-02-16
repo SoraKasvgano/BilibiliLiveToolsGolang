@@ -90,6 +90,46 @@ function suggestPushAdvancedCommand() {
   }
 }
 
+function normalizeBitrateKbps(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num) || num <= 0) return 0;
+  if (num > 120000) return 120000;
+  return Math.round(num);
+}
+
+function syncPushBitrateCustomVisibility() {
+  const preset = asString("pushBitratePreset");
+  const wrap = document.getElementById("pushBitrateCustomWrap");
+  if (!wrap) return;
+  wrap.style.display = preset === "custom" ? "" : "none";
+}
+
+function applyPushBitrateValue(value) {
+  const presetEl = document.getElementById("pushBitratePreset");
+  const customEl = document.getElementById("pushBitrateCustom");
+  if (!presetEl || !customEl) return;
+  const normalized = normalizeBitrateKbps(value);
+  if (!normalized) {
+    presetEl.value = "auto";
+  } else if (["2000", "3500", "5000", "8000", "12000"].includes(String(normalized))) {
+    presetEl.value = String(normalized);
+  } else {
+    presetEl.value = "custom";
+    customEl.value = String(normalized);
+  }
+  if (!customEl.value) {
+    customEl.value = "4500";
+  }
+  syncPushBitrateCustomVisibility();
+}
+
+function currentPushBitrateKbps() {
+  const preset = asString("pushBitratePreset");
+  if (preset === "auto") return 0;
+  if (preset === "custom") return normalizeBitrateKbps(asNumber("pushBitrateCustom", 4500));
+  return normalizeBitrateKbps(preset);
+}
+
 function withError(boxId, fn) {
   return async () => {
     try {
@@ -103,6 +143,7 @@ function withError(boxId, fn) {
 
 let mosaicSources = [];
 let mosaicDragIndex = -1;
+let mosaicLocalPreviewRunning = false;
 let latestMaintenanceStatus = null;
 let latestIntegrationFeatures = null;
 let latestAdvancedStats = null;
@@ -494,6 +535,7 @@ async function refreshPush() {
   document.getElementById("pushInputType").value = data.inputType || "video";
   document.getElementById("pushResolution").value = data.outputResolution || "1280x720";
   document.getElementById("pushQuality").value = String(data.outputQuality ?? 2);
+  applyPushBitrateValue(data.outputBitrateKbps || 0);
   document.getElementById("pushRtspUrl").value = data.rtspUrl || "";
   document.getElementById("pushMjpegUrl").value = data.mjpegUrl || "";
   document.getElementById("pushMultiEnabled").value = data.multiInputEnabled ? "true" : "false";
@@ -873,6 +915,73 @@ function buildMosaicPreview() {
   };
 }
 
+function buildPushPayload() {
+  const mosaic = getMosaicPayload();
+  return {
+    model: asNumber("pushModel", 1),
+    inputType: asString("pushInputType"),
+    outputResolution: asString("pushResolution"),
+    outputQuality: asNumber("pushQuality", 2),
+    outputBitrateKbps: currentPushBitrateKbps(),
+    rtspUrl: asString("pushRtspUrl"),
+    mjpegUrl: asString("pushMjpegUrl"),
+    multiInputEnabled: asString("pushMultiEnabled") === "true",
+    multiInputLayout: asString("pushMultiLayout"),
+    multiInputUrls: mosaic.urls,
+    multiInputMeta: mosaic.meta,
+    inputDeviceName: asString("pushCameraName"),
+    inputDeviceResolution: asString("pushCameraResolution"),
+    ffmpegCommand: document.getElementById("pushCommand").value || "",
+    isAutoRetry: asString("pushAutoRetry") === "true",
+    retryInterval: asNumber("pushRetryInterval", 30),
+    onvifEndpoint: asString("ptzEndpoint"),
+    onvifUsername: asString("ptzUsername"),
+    onvifPassword: document.getElementById("ptzPassword").value || "",
+    onvifProfileToken: asString("ptzProfileToken"),
+  };
+}
+
+function setMosaicPreviewInfo(message) {
+  const el = document.getElementById("mosaicLocalPreviewInfo");
+  if (!el) return;
+  el.textContent = message || "";
+}
+
+function stopMosaicLocalPreview() {
+  const img = document.getElementById("mosaicLocalPreviewImage");
+  if (!img) return;
+  mosaicLocalPreviewRunning = false;
+  img.style.display = "none";
+  img.src = "";
+  setMosaicPreviewInfo("本地预览已关闭。");
+}
+
+async function startMosaicLocalPreview() {
+  const payload = buildPushPayload();
+  const saveResult = await apiPost("/api/v1/push/setting", payload);
+  setBox("pushBox", saveResult);
+  if (saveResult && Number(saveResult.code) < 0) {
+    throw new Error(saveResult.message || "保存推流配置失败，无法开启本地预览");
+  }
+
+  const width = Math.max(240, Math.min(1920, asNumber("mosaicLocalPreviewWidth", 960)));
+  const fps = Math.max(1, Math.min(20, asNumber("mosaicLocalPreviewFps", 10)));
+  const img = document.getElementById("mosaicLocalPreviewImage");
+  if (!img) return;
+  mosaicLocalPreviewRunning = true;
+  img.style.display = "block";
+  img.onerror = () => {
+    if (!mosaicLocalPreviewRunning) return;
+    setMosaicPreviewInfo("本地预览连接失败，请检查拼屏源地址/摄像头状态后重试。");
+  };
+  img.onload = () => {
+    if (!mosaicLocalPreviewRunning) return;
+    setMosaicPreviewInfo("本地预览进行中（已降帧降宽，便于调试且节省资源）");
+  };
+  img.src = `/api/v1/push/preview/mjpeg?width=${width}&fps=${fps}&_ts=${Date.now()}`;
+  setMosaicPreviewInfo("正在建立本地预览连接...");
+}
+
 function bindActions() {
   document.getElementById("btnLoadRuntimeConfig").onclick = withError("configBox", refreshRuntimeConfig);
   document.getElementById("btnSaveRuntimeConfig").onclick = withError("configBox", async () => {
@@ -960,28 +1069,7 @@ function bindActions() {
 
   document.getElementById("btnLoadPush").onclick = withError("pushBox", refreshPush);
   document.getElementById("btnSavePush").onclick = withError("pushBox", async () => {
-    const mosaic = getMosaicPayload();
-    const payload = {
-      model: asNumber("pushModel", 1),
-      inputType: asString("pushInputType"),
-      outputResolution: asString("pushResolution"),
-      outputQuality: asNumber("pushQuality", 2),
-      rtspUrl: asString("pushRtspUrl"),
-      mjpegUrl: asString("pushMjpegUrl"),
-      multiInputEnabled: asString("pushMultiEnabled") === "true",
-      multiInputLayout: asString("pushMultiLayout"),
-      multiInputUrls: mosaic.urls,
-      multiInputMeta: mosaic.meta,
-      inputDeviceName: asString("pushCameraName"),
-      inputDeviceResolution: asString("pushCameraResolution"),
-      ffmpegCommand: document.getElementById("pushCommand").value || "",
-      isAutoRetry: asString("pushAutoRetry") === "true",
-      retryInterval: asNumber("pushRetryInterval", 30),
-      onvifEndpoint: asString("ptzEndpoint"),
-      onvifUsername: asString("ptzUsername"),
-      onvifPassword: document.getElementById("ptzPassword").value || "",
-      onvifProfileToken: asString("ptzProfileToken"),
-    };
+    const payload = buildPushPayload();
     const result = await apiPost("/api/v1/push/setting", payload);
     setBox("pushBox", result);
   });
@@ -1005,8 +1093,14 @@ function bindActions() {
     document.getElementById("pushCommand").value = recommendedAdvancedCommand(asString("pushInputType"));
     setBox("pushBox", { code: 0, message: "已按当前输入类型填充推荐高级命令" });
   });
+  document.getElementById("btnStartMosaicLocalPreview").onclick = withError("mosaicPreviewBox", startMosaicLocalPreview);
+  document.getElementById("btnStopMosaicLocalPreview").onclick = withError("mosaicPreviewBox", async () => {
+    stopMosaicLocalPreview();
+    setBox("mosaicPreviewBox", { code: 0, message: "已关闭本地预览" });
+  });
   document.getElementById("pushInputType").addEventListener("change", suggestPushAdvancedCommand);
   document.getElementById("pushModel").addEventListener("change", suggestPushAdvancedCommand);
+  document.getElementById("pushBitratePreset").addEventListener("change", syncPushBitrateCustomVisibility);
   document.getElementById("btnAddMosaicSource").onclick = withError("mosaicPreviewBox", async () => {
     const url = asString("mosaicNewSourceUrl");
     if (!url) throw new Error("请输入拼屏源地址");
@@ -1525,6 +1619,8 @@ async function init() {
     });
   });
   setMosaicSources([]);
+  applyPushBitrateValue(0);
+  stopMosaicLocalPreview();
   await refreshRuntimeConfig();
   await refreshAccount();
   await refreshRoom();

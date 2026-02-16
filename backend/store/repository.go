@@ -19,7 +19,7 @@ import (
 func (s *Store) GetPushSetting(ctx context.Context) (*PushSetting, error) {
 	const q = `SELECT
 		id, model, ffmpeg_command, is_auto_retry, retry_interval, is_update,
-		input_type, output_resolution, output_quality, custom_output_params, custom_video_codec,
+		input_type, output_resolution, output_quality, output_bitrate_kbps, custom_output_params, custom_video_codec,
 		video_material_id, audio_material_id, is_mute, input_screen, input_audio_source,
 		input_audio_device_name, input_device_name, input_device_resolution, input_device_framerate,
 		input_device_plugins, rtsp_url, mjpeg_url, onvif_endpoint, onvif_username, onvif_password,
@@ -47,6 +47,7 @@ func (s *Store) GetPushSetting(ctx context.Context) (*PushSetting, error) {
 		&item.InputType,
 		&item.OutputResolution,
 		&item.OutputQuality,
+		&item.OutputBitrateKbps,
 		&item.CustomOutputParams,
 		&item.CustomVideoCodec,
 		&videoID,
@@ -114,6 +115,7 @@ func (s *Store) UpdatePushSetting(ctx context.Context, req PushSettingUpdateRequ
 	if req.OutputResolution == "" {
 		req.OutputResolution = "1280x720"
 	}
+	req.OutputBitrateKbps = normalizeBitrateKbps(req.OutputBitrateKbps)
 	if strings.TrimSpace(req.MultiInputLayout) == "" {
 		req.MultiInputLayout = "2x2"
 	}
@@ -170,6 +172,7 @@ func (s *Store) UpdatePushSetting(ctx context.Context, req PushSettingUpdateRequ
 		input_type = ?,
 		output_resolution = ?,
 		output_quality = ?,
+		output_bitrate_kbps = ?,
 		custom_output_params = ?,
 		custom_video_codec = ?,
 		video_material_id = ?,
@@ -201,6 +204,7 @@ func (s *Store) UpdatePushSetting(ctx context.Context, req PushSettingUpdateRequ
 		inputType,
 		req.OutputResolution,
 		req.OutputQuality,
+		req.OutputBitrateKbps,
 		req.CustomOutputParams,
 		req.CustomVideoCodec,
 		videoID,
@@ -1810,6 +1814,16 @@ func boolToInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+func normalizeBitrateKbps(value int) int {
+	if value <= 0 {
+		return 0
+	}
+	if value > 120000 {
+		return 120000
+	}
+	return value
 }
 
 func normalizeOrderField(field string) string {

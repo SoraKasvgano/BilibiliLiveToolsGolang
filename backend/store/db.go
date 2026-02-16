@@ -130,6 +130,9 @@ func (s *Store) ensureSchemaUpgrades(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "push_settings", "multi_input_meta", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn(ctx, "push_settings", "output_bitrate_kbps", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	if err := s.ensureColumn(ctx, "danmaku_consumer_settings", "config_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
 		return err
 	}

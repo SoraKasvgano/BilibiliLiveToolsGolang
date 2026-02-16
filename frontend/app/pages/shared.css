@@ -176,6 +176,24 @@ pre {
   background: linear-gradient(180deg, #ffffff, #f8fbff);
 }
 
+.preview-panel {
+  margin-top: 8px;
+  border: 1px dashed #90a4c8;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fbff;
+}
+
+.preview-panel img {
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid #d6e0f2;
+  background: #0f172a;
+  display: none;
+}
+
 .table-wrap {
   margin-top: 10px;
   overflow: auto;
