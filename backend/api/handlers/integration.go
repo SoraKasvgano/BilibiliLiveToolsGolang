@@ -946,16 +946,46 @@ func (m *integrationModule) ptzDiscover(w http.ResponseWriter, r *http.Request) 
 	if timeoutMS > 15000 {
 		timeoutMS = 15000
 	}
-	items, err := m.deps.ONVIF.Discover(r.Context(), time.Duration(timeoutMS)*time.Millisecond)
+	activeScan := parseBoolQueryOrDefault(r.URL.Query().Get("activeScan"), true)
+	ports := parsePortListQuery(r.URL.Query().Get("ports"))
+	hostLimit := parseIntOrDefault(r.URL.Query().Get("hostLimit"), 512)
+	if hostLimit <= 0 {
+		hostLimit = 128
+	}
+	if hostLimit > 4096 {
+		hostLimit = 4096
+	}
+	items, err := m.deps.ONVIF.DiscoverWithOptions(r.Context(), onvif.DiscoverOptions{
+		Timeout:        time.Duration(timeoutMS) * time.Millisecond,
+		ActiveScan:     activeScan,
+		Ports:          ports,
+		MaxHosts:       hostLimit,
+		MaxConcurrency: 48,
+		RequestTimeout: 700 * time.Millisecond,
+	})
 	if err != nil {
 		httpapi.Error(w, -1, err.Error(), http.StatusOK)
 		return
 	}
-	httpapi.OK(w, map[string]any{
-		"timeoutMs": timeoutMS,
-		"count":     len(items),
-		"items":     items,
-	})
+	payload := map[string]any{
+		"timeoutMs":  timeoutMS,
+		"activeScan": activeScan,
+		"hostLimit":  hostLimit,
+		"count":      len(items),
+		"items":      items,
+	}
+	if len(ports) > 0 {
+		payload["ports"] = ports
+	}
+	if len(items) == 0 {
+		payload["hints"] = []string{
+			"确认摄像头已在厂商后台开启 ONVIF，并允许局域网发现",
+			"优先在同网段有线网络测试，避免访客网络/VLAN 隔离",
+			"可尝试加长超时：/api/v1/ptz/discover?timeoutMs=12000&activeScan=1&ports=80,2020,8899",
+			"部分 V380 机型可能仅支持 RTSP，不一定实现标准 ONVIF WS-Discovery",
+		}
+	}
+	httpapi.OK(w, payload)
 }
 
 func (m *integrationModule) ptzCommand(w http.ResponseWriter, r *http.Request) {
@@ -1615,6 +1645,45 @@ func splitWhitelistRules(raw string) []string {
 		}
 		result = append(result, item)
 	}
+	return result
+}
+
+func parseBoolQueryOrDefault(raw string, fallback bool) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
+func parsePortListQuery(raw string) []int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	replacer := strings.NewReplacer("\n", ",", ";", ",", "|", ",", " ", ",")
+	parts := strings.Split(replacer.Replace(raw), ",")
+	seen := map[int]struct{}{}
+	result := make([]int, 0, len(parts))
+	for _, item := range parts {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		port, err := strconv.Atoi(item)
+		if err != nil || port <= 0 || port > 65535 {
+			continue
+		}
+		if _, ok := seen[port]; ok {
+			continue
+		}
+		seen[port] = struct{}{}
+		result = append(result, port)
+	}
+	sort.Ints(result)
 	return result
 }
 

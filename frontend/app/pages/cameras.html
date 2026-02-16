@@ -471,7 +471,7 @@
     }
 
     async function discoverOnvif() {
-      const result = await requestJSON("/api/v1/ptz/discover?timeoutMs=3500");
+      const result = await requestJSON("/api/v1/ptz/discover?timeoutMs=8000");
       showJSON("cameraBox", result);
       const list = document.getElementById("discoveredOnvifList");
       list.innerHTML = '<option value="">（请选择发现到的 ONVIF 设备）</option>';

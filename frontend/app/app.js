@@ -1337,7 +1337,7 @@ function bindActions() {
     setBox("integrationBox", result);
   });
   document.getElementById("btnPTZDiscover").onclick = withError("integrationBox", async () => {
-    const result = await apiGet("/api/v1/ptz/discover?timeoutMs=3000");
+    const result = await apiGet("/api/v1/ptz/discover?timeoutMs=8000");
     setBox("integrationBox", result);
     const select = document.getElementById("ptzDiscoveredList");
     select.innerHTML = '<option value="">（请选择自动发现到的设备）</option>';

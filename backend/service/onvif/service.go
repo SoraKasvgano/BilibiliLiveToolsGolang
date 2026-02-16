@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -57,6 +58,17 @@ type DiscoveredDevice struct {
 	From     string   `json:"from"`
 }
 
+type DiscoverOptions struct {
+	Timeout        time.Duration
+	ActiveScan     bool
+	Ports          []int
+	MaxHosts       int
+	MaxConcurrency int
+	RequestTimeout time.Duration
+}
+
+var defaultDiscoverPorts = []int{80, 2020, 554, 8080, 8000, 8899, 443, 8443}
+
 func New() *Service {
 	return &Service{
 		client: &http.Client{Timeout: 12 * time.Second},
@@ -64,79 +76,119 @@ func New() *Service {
 }
 
 func (s *Service) Discover(ctx context.Context, timeout time.Duration) ([]DiscoveredDevice, error) {
+	return s.DiscoverWithOptions(ctx, DiscoverOptions{
+		Timeout:        timeout,
+		ActiveScan:     true,
+		Ports:          defaultDiscoverPorts,
+		MaxHosts:       512,
+		MaxConcurrency: 48,
+		RequestTimeout: 700 * time.Millisecond,
+	})
+}
+
+func (s *Service) DiscoverWithOptions(ctx context.Context, opts DiscoverOptions) ([]DiscoveredDevice, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = 3 * time.Second
 	}
 	if timeout > 15*time.Second {
 		timeout = 15 * time.Second
 	}
-
-	conn, err := net.ListenPacket("udp4", ":0")
-	if err != nil {
-		return nil, err
+	ports := normalizeDiscoveryPorts(opts.Ports)
+	if len(ports) == 0 {
+		ports = append([]int{}, defaultDiscoverPorts...)
 	}
-	defer conn.Close()
-
-	messageID, err := randomUUID()
-	if err != nil {
-		return nil, err
+	maxHosts := opts.MaxHosts
+	if maxHosts <= 0 {
+		maxHosts = 512
 	}
-	probe := buildDiscoveryProbe("urn:uuid:" + messageID)
-	target := &net.UDPAddr{IP: net.ParseIP("239.255.255.250"), Port: 3702}
-	if _, err := conn.WriteTo([]byte(probe), target); err != nil {
-		return nil, err
+	if maxHosts > 4096 {
+		maxHosts = 4096
+	}
+	maxConcurrency := opts.MaxConcurrency
+	if maxConcurrency <= 0 {
+		maxConcurrency = 48
+	}
+	if maxConcurrency > 256 {
+		maxConcurrency = 256
+	}
+	requestTimeout := opts.RequestTimeout
+	if requestTimeout <= 0 {
+		requestTimeout = 700 * time.Millisecond
+	}
+	if requestTimeout > 3*time.Second {
+		requestTimeout = 3 * time.Second
+	}
+	startedAt := time.Now()
+	wsTimeout := timeout
+	if opts.ActiveScan && timeout > 2200*time.Millisecond {
+		wsTimeout = (timeout * 2) / 3
+		if wsTimeout < 1200*time.Millisecond {
+			wsTimeout = 1200 * time.Millisecond
+		}
 	}
 
-	deadline := time.Now().Add(timeout)
-	_ = conn.SetReadDeadline(time.Now().Add(350 * time.Millisecond))
+	bindIPs := discoverCandidateIPv4()
+	targets := make([]net.IP, 0, len(bindIPs)+1)
+	targets = append(targets, nil) // wildcard socket for default route
+	targets = append(targets, bindIPs...)
+
+	probes := make([]string, 0, 2)
+	for _, types := range []string{"dn:NetworkVideoTransmitter", ""} {
+		messageID, err := randomUUID()
+		if err != nil {
+			return nil, err
+		}
+		probes = append(probes, buildDiscoveryProbe("urn:uuid:"+messageID, types))
+	}
+
+	type discoverResult struct {
+		items []DiscoveredDevice
+		err   error
+	}
+	results := make(chan discoverResult, len(targets))
+
+	var wg sync.WaitGroup
+	for _, bindIP := range targets {
+		ip := append(net.IP(nil), bindIP...)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			items, err := s.discoverFromBind(ctx, ip, wsTimeout, probes)
+			results <- discoverResult{items: items, err: err}
+		}()
+	}
+	wg.Wait()
+	close(results)
+
 	seen := map[string]DiscoveredDevice{}
-	buffer := make([]byte, 64<<10)
+	var firstErr error
+	successCount := 0
+	for result := range results {
+		if result.err != nil {
+			if firstErr == nil {
+				firstErr = result.err
+			}
+			continue
+		}
+		successCount++
+		for _, device := range result.items {
+			mergeDiscoveredDevice(seen, device)
+		}
+	}
+	if successCount == 0 && firstErr != nil {
+		return nil, firstErr
+	}
 
-	for {
-		if time.Now().After(deadline) {
-			break
+	remaining := timeout - time.Since(startedAt)
+	if opts.ActiveScan && remaining > 1200*time.Millisecond {
+		activeItems := s.activeDiscover(ctx, remaining, ports, maxHosts, maxConcurrency, requestTimeout)
+		for _, item := range activeItems {
+			mergeDiscoveredDevice(seen, item)
 		}
-		n, remoteAddr, readErr := conn.ReadFrom(buffer)
-		if readErr != nil {
-			if netErr, ok := readErr.(net.Error); ok && netErr.Timeout() {
-				_ = conn.SetReadDeadline(time.Now().Add(350 * time.Millisecond))
-				continue
-			}
-			break
-		}
-		xmlBody := string(buffer[:n])
-		device := parseDiscoveryResponse(xmlBody)
-		if len(device.XAddrs) == 0 {
-			continue
-		}
-		device.From = remoteAddr.String()
-		if strings.TrimSpace(device.Endpoint) == "" {
-			device.Endpoint = device.XAddrs[0]
-		}
-		key := strings.TrimSpace(device.URN)
-		if key == "" {
-			key = strings.TrimSpace(device.Endpoint)
-		}
-		if key == "" {
-			continue
-		}
-		if existing, ok := seen[key]; ok {
-			existing.XAddrs = mergeStringSlice(existing.XAddrs, device.XAddrs)
-			existing.Types = mergeStringSlice(existing.Types, device.Types)
-			existing.Scopes = mergeStringSlice(existing.Scopes, device.Scopes)
-			if existing.Endpoint == "" && device.Endpoint != "" {
-				existing.Endpoint = device.Endpoint
-			}
-			if existing.From == "" && device.From != "" {
-				existing.From = device.From
-			}
-			seen[key] = existing
-			continue
-		}
-		seen[key] = device
 	}
 
 	result := make([]DiscoveredDevice, 0, len(seen))
@@ -150,6 +202,461 @@ func (s *Service) Discover(ctx context.Context, timeout time.Duration) ([]Discov
 		return result[i].Endpoint < result[j].Endpoint
 	})
 	return result, nil
+}
+
+func (s *Service) discoverFromBind(ctx context.Context, bindIP net.IP, timeout time.Duration, probes []string) ([]DiscoveredDevice, error) {
+	listenAddr := ":0"
+	if ip := strings.TrimSpace(bindIP.String()); ip != "" && ip != "<nil>" {
+		listenAddr = net.JoinHostPort(ip, "0")
+	}
+	conn, err := net.ListenPacket("udp4", listenAddr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	target := &net.UDPAddr{IP: net.ParseIP("239.255.255.250"), Port: 3702}
+	for attempt := 0; attempt < 2; attempt++ {
+		for _, probe := range probes {
+			if _, err := conn.WriteTo([]byte(probe), target); err != nil {
+				return nil, err
+			}
+		}
+		if attempt == 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(120 * time.Millisecond):
+			}
+		}
+	}
+
+	seen := map[string]DiscoveredDevice{}
+	buffer := make([]byte, 64<<10)
+	deadline := time.Now().Add(timeout)
+
+	for {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		remain := time.Until(deadline)
+		if remain <= 0 {
+			break
+		}
+		wait := 350 * time.Millisecond
+		if remain < wait {
+			wait = remain
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(wait))
+		n, remoteAddr, readErr := conn.ReadFrom(buffer)
+		if readErr != nil {
+			if netErr, ok := readErr.(net.Error); ok && netErr.Timeout() {
+				continue
+			}
+			return nil, readErr
+		}
+		device := parseDiscoveryResponse(string(buffer[:n]))
+		if len(device.XAddrs) == 0 {
+			continue
+		}
+		if !isLikelyONVIFDevice(device) {
+			continue
+		}
+		device.From = remoteAddr.String()
+		mergeDiscoveredDevice(seen, device)
+	}
+
+	items := make([]DiscoveredDevice, 0, len(seen))
+	for _, item := range seen {
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func discoverCandidateIPv4() []net.IP {
+	items, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	result := make([]net.IP, 0, 4)
+	for _, iface := range items {
+		// Exclude down/loopback interfaces; keep interface scan lightweight.
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ip := addressIPv4(addr)
+			if ip == nil {
+				continue
+			}
+			key := ip.String()
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			result = append(result, ip)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].String() < result[j].String() })
+	return result
+}
+
+func addressIPv4(addr net.Addr) net.IP {
+	var ip net.IP
+	switch value := addr.(type) {
+	case *net.IPNet:
+		ip = value.IP
+	case *net.IPAddr:
+		ip = value.IP
+	default:
+		return nil
+	}
+	ip = ip.To4()
+	if ip == nil {
+		return nil
+	}
+	if ip.IsLoopback() || ip.IsLinkLocalMulticast() {
+		return nil
+	}
+	return append(net.IP(nil), ip...)
+}
+
+func mergeDiscoveredDevice(seen map[string]DiscoveredDevice, device DiscoveredDevice) {
+	if seen == nil {
+		return
+	}
+	if strings.TrimSpace(device.Endpoint) == "" && len(device.XAddrs) > 0 {
+		device.Endpoint = strings.TrimSpace(device.XAddrs[0])
+	}
+	key := strings.TrimSpace(device.URN)
+	if key == "" {
+		key = strings.TrimSpace(device.Endpoint)
+	}
+	if key == "" {
+		return
+	}
+	if existing, ok := seen[key]; ok {
+		existing.XAddrs = mergeStringSlice(existing.XAddrs, device.XAddrs)
+		existing.Types = mergeStringSlice(existing.Types, device.Types)
+		existing.Scopes = mergeStringSlice(existing.Scopes, device.Scopes)
+		if existing.Endpoint == "" && device.Endpoint != "" {
+			existing.Endpoint = device.Endpoint
+		}
+		if existing.From == "" && device.From != "" {
+			existing.From = device.From
+		}
+		seen[key] = existing
+		return
+	}
+	seen[key] = device
+}
+
+func isLikelyONVIFDevice(device DiscoveredDevice) bool {
+	for _, xaddr := range device.XAddrs {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(xaddr)), "/onvif") {
+			return true
+		}
+	}
+	for _, item := range device.Types {
+		value := strings.ToLower(strings.TrimSpace(item))
+		if strings.Contains(value, "networkvideotransmitter") ||
+			strings.Contains(value, "tds:device") ||
+			strings.Contains(value, "video_encoder") ||
+			strings.Contains(value, "network_video") {
+			return true
+		}
+	}
+	for _, scope := range device.Scopes {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(scope)), "onvif://") {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeDiscoveryPorts(ports []int) []int {
+	if len(ports) == 0 {
+		return nil
+	}
+	seen := map[int]struct{}{}
+	result := make([]int, 0, len(ports))
+	for _, port := range ports {
+		if port <= 0 || port > 65535 {
+			continue
+		}
+		if _, ok := seen[port]; ok {
+			continue
+		}
+		seen[port] = struct{}{}
+		result = append(result, port)
+	}
+	return result
+}
+
+func (s *Service) activeDiscover(parent context.Context, timeout time.Duration, ports []int, maxHosts int, maxConcurrency int, requestTimeout time.Duration) []DiscoveredDevice {
+	if timeout < 2*time.Second {
+		return nil
+	}
+	if len(ports) == 0 || maxHosts <= 0 || maxConcurrency <= 0 {
+		return nil
+	}
+	ctx := parent
+	var cancel context.CancelFunc
+	if deadline, ok := parent.Deadline(); !ok || time.Until(deadline) > timeout {
+		ctx, cancel = context.WithTimeout(parent, timeout)
+		defer cancel()
+	}
+
+	hosts := discoverSubnetHosts(maxHosts)
+	if len(hosts) == 0 {
+		return nil
+	}
+
+	results := make(chan DiscoveredDevice, len(hosts))
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+	for _, host := range hosts {
+		hostIP := append(net.IP(nil), host...)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case <-ctx.Done():
+				return
+			case sem <- struct{}{}:
+			}
+			defer func() { <-sem }()
+			device, ok := s.probeHostForONVIF(ctx, hostIP, ports, requestTimeout)
+			if !ok {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case results <- device:
+			}
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	seen := map[string]DiscoveredDevice{}
+	for item := range results {
+		mergeDiscoveredDevice(seen, item)
+	}
+	items := make([]DiscoveredDevice, 0, len(seen))
+	for _, item := range seen {
+		items = append(items, item)
+	}
+	return items
+}
+
+func (s *Service) probeHostForONVIF(ctx context.Context, host net.IP, ports []int, requestTimeout time.Duration) (DiscoveredDevice, bool) {
+	if host == nil {
+		return DiscoveredDevice{}, false
+	}
+	paths := []string{
+		"/onvif/device_service",
+		"/onvif/device_service/",
+		"/onvif/deviceservice",
+		"/onvif/device_service?wsdl",
+	}
+	hostText := host.String()
+	for _, port := range ports {
+		for _, scheme := range discoverySchemesForPort(port) {
+			for _, requestPath := range paths {
+				select {
+				case <-ctx.Done():
+					return DiscoveredDevice{}, false
+				default:
+				}
+				endpoint := fmt.Sprintf("%s://%s:%d%s", scheme, hostText, port, requestPath)
+				if !s.probeONVIFEndpoint(ctx, endpoint, requestTimeout) {
+					continue
+				}
+				return DiscoveredDevice{
+					Endpoint: endpoint,
+					XAddrs:   []string{endpoint},
+					Types:    []string{"dn:NetworkVideoTransmitter"},
+					Scopes:   []string{"scan://active-probe"},
+					From:     "active-probe",
+				}, true
+			}
+		}
+	}
+	return DiscoveredDevice{}, false
+}
+
+func discoverySchemesForPort(port int) []string {
+	if port == 443 || port == 8443 {
+		return []string{"https", "http"}
+	}
+	return []string{"http", "https"}
+}
+
+func (s *Service) probeONVIFEndpoint(parent context.Context, endpoint string, requestTimeout time.Duration) bool {
+	probeCtx, cancel := context.WithTimeout(parent, requestTimeout)
+	defer cancel()
+
+	envelope := `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">` +
+		`<s:Body>` +
+		`<tds:GetCapabilities xmlns:tds="http://www.onvif.org/ver10/device/wsdl">` +
+		`<tds:Category>All</tds:Category>` +
+		`</tds:GetCapabilities>` +
+		`</s:Body></s:Envelope>`
+
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodPost, endpoint, strings.NewReader(envelope))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", `application/soap+xml; charset=utf-8; action="http://www.onvif.org/ver10/device/wsdl/GetCapabilities"`)
+	req.Header.Set("SOAPAction", "http://www.onvif.org/ver10/device/wsdl/GetCapabilities")
+	req.Header.Set("User-Agent", "gover-onvif-discover/1.0")
+
+	resp, err := s.client.Do(req)
+	if err != nil || resp == nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	return isLikelyONVIFHTTPResponse(endpoint, resp.StatusCode, resp.Header, body)
+}
+
+func isLikelyONVIFHTTPResponse(endpoint string, statusCode int, headers http.Header, body []byte) bool {
+	if statusCode == http.StatusNotFound {
+		return false
+	}
+	lowerEndpoint := strings.ToLower(strings.TrimSpace(endpoint))
+	lowerBody := strings.ToLower(string(body))
+	lowerType := strings.ToLower(strings.TrimSpace(headers.Get("Content-Type")))
+	lowerAuth := strings.ToLower(strings.TrimSpace(headers.Get("WWW-Authenticate")))
+
+	if strings.Contains(lowerBody, "onvif") ||
+		strings.Contains(lowerBody, "soap") ||
+		strings.Contains(lowerBody, "envelope") ||
+		strings.Contains(lowerType, "soap") ||
+		strings.Contains(lowerType, "xml") {
+		return true
+	}
+	if strings.Contains(lowerAuth, "digest") || strings.Contains(lowerAuth, "basic") {
+		if strings.Contains(lowerEndpoint, "/onvif/") {
+			return true
+		}
+	}
+	if (statusCode == http.StatusUnauthorized ||
+		statusCode == http.StatusForbidden ||
+		statusCode == http.StatusMethodNotAllowed) && strings.Contains(lowerEndpoint, "/onvif/") {
+		return true
+	}
+	return false
+}
+
+func discoverSubnetHosts(maxHosts int) []net.IP {
+	if maxHosts <= 0 {
+		return nil
+	}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	hosts := make([]net.IP, 0, maxHosts)
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok || ipNet == nil {
+				continue
+			}
+			localIP := ipNet.IP.To4()
+			if localIP == nil {
+				continue
+			}
+			candidates := expandHostCandidates(localIP, ipNet.Mask)
+			for _, host := range candidates {
+				key := host.String()
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				hosts = append(hosts, host)
+				if len(hosts) >= maxHosts {
+					sort.Slice(hosts, func(i, j int) bool { return hosts[i].String() < hosts[j].String() })
+					return hosts
+				}
+			}
+		}
+	}
+	sort.Slice(hosts, func(i, j int) bool { return hosts[i].String() < hosts[j].String() })
+	return hosts
+}
+
+func expandHostCandidates(localIP net.IP, mask net.IPMask) []net.IP {
+	ip := localIP.To4()
+	if ip == nil {
+		return nil
+	}
+	ones, bits := mask.Size()
+	if bits != 32 {
+		return nil
+	}
+	if ones < 24 {
+		mask = net.CIDRMask(24, 32)
+		ones = 24
+	}
+	if ones >= 31 {
+		return nil
+	}
+	network := ip.Mask(mask).To4()
+	if network == nil {
+		return nil
+	}
+	total := 1 << uint(32-ones)
+	start := ipToUint32(network) + 1
+	end := ipToUint32(network) + uint32(total) - 2
+	if end < start {
+		return nil
+	}
+
+	result := make([]net.IP, 0, total-2)
+	localValue := ipToUint32(ip)
+	for value := start; value <= end; value++ {
+		if value == localValue {
+			continue
+		}
+		result = append(result, uint32ToIPv4(value))
+	}
+	return result
+}
+
+func ipToUint32(ip net.IP) uint32 {
+	v := ip.To4()
+	if v == nil {
+		return 0
+	}
+	return uint32(v[0])<<24 | uint32(v[1])<<16 | uint32(v[2])<<8 | uint32(v[3])
+}
+
+func uint32ToIPv4(value uint32) net.IP {
+	return net.IPv4(
+		byte((value>>24)&0xff),
+		byte((value>>16)&0xff),
+		byte((value>>8)&0xff),
+		byte(value&0xff),
+	).To4()
 }
 
 func (s *Service) GetCapabilities(ctx context.Context, endpoint string, username string, password string) (*Capabilities, error) {
@@ -591,7 +1098,11 @@ func xmlEscape(value string) string {
 	return replacer.Replace(value)
 }
 
-func buildDiscoveryProbe(messageID string) string {
+func buildDiscoveryProbe(messageID string, types string) string {
+	probeTypes := ""
+	if strings.TrimSpace(types) != "" {
+		probeTypes = `<d:Types>` + xmlEscape(strings.TrimSpace(types)) + `</d:Types>`
+	}
 	return `<?xml version="1.0" encoding="UTF-8"?>` +
 		`<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope"` +
 		` xmlns:w="http://schemas.xmlsoap.org/ws/2004/08/addressing"` +
@@ -602,7 +1113,7 @@ func buildDiscoveryProbe(messageID string) string {
 		`<w:To>urn:schemas-xmlsoap-org:ws:2005:04:discovery</w:To>` +
 		`<w:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</w:Action>` +
 		`</e:Header>` +
-		`<e:Body><d:Probe><d:Types>dn:NetworkVideoTransmitter</d:Types></d:Probe></e:Body>` +
+		`<e:Body><d:Probe>` + probeTypes + `</d:Probe></e:Body>` +
 		`</e:Envelope>`
 }
 
