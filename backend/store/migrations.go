@@ -266,6 +266,22 @@ var schemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_bilibili_api_error_logs_created_at ON bilibili_api_error_logs(created_at);`,
 	`CREATE INDEX IF NOT EXISTS idx_bilibili_api_error_logs_endpoint ON bilibili_api_error_logs(endpoint);`,
 	`CREATE INDEX IF NOT EXISTS idx_maintenance_settings_updated_at ON maintenance_settings(updated_at);`,
+	`CREATE TABLE IF NOT EXISTS admin_users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT NOT NULL UNIQUE,
+		password_hash TEXT NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);`,
+	`CREATE TABLE IF NOT EXISTS admin_sessions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+		token TEXT NOT NULL UNIQUE,
+		expires_at DATETIME NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_admin_sessions_token ON admin_sessions(token);`,
+	`CREATE INDEX IF NOT EXISTS idx_admin_sessions_expires ON admin_sessions(expires_at);`,
 }
 
 var seedStatements = []string{
@@ -323,6 +339,15 @@ var seedStatements = []string{
 	SELECT 'bilibili', '', 'Plain text API key for future Bilibili automation'
 	WHERE NOT EXISTS (SELECT 1 FROM api_key_settings WHERE name = 'bilibili');`,
 	`INSERT INTO api_key_settings (name, api_key, description)
+	SELECT 'api_access_token', '', 'Global API access token fallback for backend auth (X-API-Key / Bearer)'
+	WHERE NOT EXISTS (SELECT 1 FROM api_key_settings WHERE name = 'api_access_token');`,
+	`INSERT INTO api_key_settings (name, api_key, description)
+	SELECT 'admin_api_token', '', 'Alternative admin API token for non-browser clients'
+	WHERE NOT EXISTS (SELECT 1 FROM api_key_settings WHERE name = 'admin_api_token');`,
+	`INSERT INTO api_key_settings (name, api_key, description)
+	SELECT 'api_token', '', 'Legacy API token alias for compatibility'
+	WHERE NOT EXISTS (SELECT 1 FROM api_key_settings WHERE name = 'api_token');`,
+	`INSERT INTO api_key_settings (name, api_key, description)
 	SELECT 'pushoo', '', 'Pushoo service base url (for example: http://127.0.0.1:8084/send)'
 	WHERE NOT EXISTS (SELECT 1 FROM api_key_settings WHERE name = 'pushoo');`,
 	`INSERT INTO api_key_settings (name, api_key, description)
@@ -369,4 +394,7 @@ var seedStatements = []string{
 	`INSERT INTO maintenance_settings (enabled, retention_days, auto_vacuum)
 	SELECT 1, 7, 1
 	WHERE NOT EXISTS (SELECT 1 FROM maintenance_settings LIMIT 1);`,
+	`INSERT INTO admin_users (username, password_hash)
+	SELECT 'admin', '$2a$10$/f/lGuzKkDis1gDBarabAuxCL.atTUPawMSx3cpcE5X2xKUhIX4Di'
+	WHERE NOT EXISTS (SELECT 1 FROM admin_users LIMIT 1);`,
 }

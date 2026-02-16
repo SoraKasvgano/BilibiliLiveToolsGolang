@@ -1,6 +1,9 @@
 (function () {
   const roles = ["viewer", "operator", "admin"];
   const roleLevel = { viewer: 1, operator: 2, admin: 3 };
+  const authTokenKey = "gover_admin_token";
+  const authUserKey = "gover_admin_user";
+  const adminLoginPath = "/app/pages/admin-login.html";
   let toastContainer = null;
   let confirmDialog = null;
 
@@ -24,6 +27,53 @@
     const next = safeRole(role);
     localStorage.setItem("gover_role", next);
     return next;
+  }
+
+  function isAdminLoginPage() {
+    return window.location.pathname === adminLoginPath;
+  }
+
+  function getAuthToken() {
+    return String(localStorage.getItem(authTokenKey) || "").trim();
+  }
+
+  function getAuthUser() {
+    try {
+      const raw = localStorage.getItem(authUserKey);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  function setAuthToken(token, user) {
+    const text = String(token || "").trim();
+    if (!text) {
+      clearAuth();
+      return;
+    }
+    localStorage.setItem(authTokenKey, text);
+    if (user && typeof user === "object") {
+      localStorage.setItem(authUserKey, JSON.stringify(user));
+    }
+  }
+
+  function clearAuth() {
+    localStorage.removeItem(authTokenKey);
+    localStorage.removeItem(authUserKey);
+  }
+
+  function currentPagePath() {
+    return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  }
+
+  function goAdminLogin() {
+    if (isAdminLoginPage()) return;
+    const next = encodeURIComponent(currentPagePath());
+    window.location.replace(`${adminLoginPath}?next=${next}`);
   }
 
   function canAccess(required, role) {
@@ -102,6 +152,13 @@
 
     const actions = document.createElement("div");
     actions.className = "nav-actions";
+
+    const authMeta = document.createElement("span");
+    authMeta.className = "soft-note";
+    const user = getAuthUser();
+    authMeta.textContent = user && user.username ? `管理员：${user.username}` : "未登录";
+    actions.appendChild(authMeta);
+
     const label = document.createElement("label");
     label.textContent = "角色";
     const roleSelect = document.createElement("select");
@@ -119,6 +176,30 @@
     };
     label.appendChild(roleSelect);
     actions.appendChild(label);
+
+    const btnPwd = document.createElement("button");
+    btnPwd.type = "button";
+    btnPwd.className = "btn-ghost";
+    btnPwd.textContent = "修改密码";
+    btnPwd.onclick = () => {
+      changePasswordFlow().catch((error) => {
+        showToast(error.message || String(error), "error");
+      });
+    };
+    actions.appendChild(btnPwd);
+
+    const btnLogout = document.createElement("button");
+    btnLogout.type = "button";
+    btnLogout.className = "btn-danger";
+    btnLogout.textContent = "退出登录";
+    btnLogout.onclick = () => {
+      logoutFlow().catch(() => {
+        clearAuth();
+        goAdminLogin();
+      });
+    };
+    actions.appendChild(btnLogout);
+
     container.appendChild(actions);
 
     toggle.onclick = () => {
@@ -126,14 +207,64 @@
     };
   }
 
+  async function logoutFlow() {
+    const payload = JSON.stringify({});
+    try {
+      await requestJSON("/api/v1/auth/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+        noAuthRedirect: true,
+      });
+    } catch {
+      // Ignore logout request failures and always clear local state.
+    }
+    clearAuth();
+    goAdminLogin();
+  }
+
+  async function changePasswordFlow() {
+    const oldPassword = window.prompt("请输入当前管理员密码");
+    if (oldPassword === null) return;
+    const newPassword = window.prompt("请输入新密码（至少 4 位）");
+    if (newPassword === null) return;
+    await requestJSON("/api/v1/auth/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        oldPassword: String(oldPassword),
+        newPassword: String(newPassword),
+      }),
+    });
+    showToast("密码修改成功，请重新登录", "success");
+    await logoutFlow();
+  }
+
   async function requestJSON(path, options = {}) {
-    const response = await fetch(path, options);
+    const opts = options || {};
+    const headers = new Headers(opts.headers || {});
+    if (!headers.has("Authorization")) {
+      const token = getAuthToken();
+      if (token) {
+        headers.set("Authorization", `Bearer ${token}`);
+      }
+    }
+    const requestInit = { ...opts, headers };
+    delete requestInit.noAuthRedirect;
+
+    const response = await fetch(path, requestInit);
     const text = await response.text();
     let payload = {};
     try {
       payload = JSON.parse(text);
     } catch {
       payload = { code: -1, message: text || "Non-JSON response" };
+    }
+    if (response.status === 401 || Number(payload.code || 0) === -401) {
+      if (!opts.noAuthRedirect && !isAdminLoginPage()) {
+        clearAuth();
+        goAdminLogin();
+      }
     }
     if (!response.ok) {
       const err = new Error(payload.message || `HTTP ${response.status}`);
@@ -361,14 +492,48 @@
     };
   }
 
+  async function ensureAuthenticated() {
+    if (isAdminLoginPage()) return true;
+    const token = getAuthToken();
+    if (!token) {
+      goAdminLogin();
+      return false;
+    }
+    try {
+      const status = await requestJSON("/api/v1/auth/status", { noAuthRedirect: true });
+      const ok = Boolean(status && status.data && status.data.authenticated);
+      if (!ok) {
+        clearAuth();
+        goAdminLogin();
+        return false;
+      }
+      const user = status && status.data && status.data.user ? status.data.user : null;
+      if (user) {
+        localStorage.setItem(authUserKey, JSON.stringify(user));
+      }
+      return true;
+    } catch {
+      clearAuth();
+      goAdminLogin();
+      return false;
+    }
+  }
+
   function initPage(options) {
     const opts = options || {};
-    renderNav(opts.active || "");
-    applyPermissions();
+    if (opts.renderNav !== false) {
+      renderNav(opts.active || "");
+    }
+    if (opts.applyPermissions !== false) {
+      applyPermissions();
+    }
     document.querySelectorAll("pre[id]").forEach((pre) => {
       wrapCollapsibleJSON(pre.id);
     });
     ensureToastContainer();
+    if (opts.requireAuth !== false) {
+      ensureAuthenticated().catch(() => {});
+    }
   }
 
   window.GoverShared = {
@@ -387,5 +552,10 @@
     markFields,
     statusBadge,
     createPoller,
+    getAuthToken,
+    setAuthToken,
+    clearAuth,
+    ensureAuthenticated,
+    goAdminLogin,
   };
 })();

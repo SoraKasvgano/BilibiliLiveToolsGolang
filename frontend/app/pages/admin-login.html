@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>管理员登录</title>
+  <link rel="stylesheet" href="/app/pages/shared.css" />
+</head>
+<body>
+  <main class="page-shell" style="max-width:560px;padding-top:42px;">
+    <section class="page-card">
+      <h1>管理员登录</h1>
+      <p class="soft-note">默认账号：admin / admin。首次进入后建议立即修改密码。</p>
+      <div class="grid">
+        <label>用户名
+          <input id="username" value="admin" autocomplete="username" />
+        </label>
+        <label>密码
+          <input id="password" type="password" value="admin" autocomplete="current-password" />
+        </label>
+      </div>
+      <div class="actions">
+        <button id="btnLogin" class="btn-success btn-lg">登录</button>
+      </div>
+      <pre id="loginBox">{}</pre>
+    </section>
+  </main>
+
+  <script src="/app/pages/shared.js"></script>
+  <script>
+    const {
+      initPage,
+      requestJSON,
+      showJSON,
+      showToast,
+      setAuthToken,
+      setRole,
+      getAuthToken,
+    } = window.GoverShared;
+    initPage({ renderNav: false, applyPermissions: false, requireAuth: false });
+
+    function resolveNextPath() {
+      const params = new URLSearchParams(window.location.search);
+      const next = (params.get("next") || "").trim();
+      if (next && next.startsWith("/")) return next;
+      return "/app/pages/home.html";
+    }
+
+    async function tryResumeSession() {
+      const token = getAuthToken();
+      if (!token) return;
+      try {
+        const result = await requestJSON("/api/v1/auth/status", { noAuthRedirect: true });
+        if (result && result.data && result.data.authenticated) {
+          window.location.replace(resolveNextPath());
+        }
+      } catch {
+        // Ignore invalid/expired token and continue login flow.
+      }
+    }
+
+    async function doLogin() {
+      const username = (document.getElementById("username").value || "").trim();
+      const password = (document.getElementById("password").value || "").trim();
+      if (!username || !password) {
+        throw new Error("请输入用户名和密码");
+      }
+      const result = await requestJSON("/api/v1/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+        noAuthRedirect: true,
+      });
+      if (Number(result.code || 0) !== 0 || !result.data || !result.data.token) {
+        throw new Error(result.message || "登录失败");
+      }
+      setAuthToken(result.data.token, result.data.user || null);
+      setRole("admin");
+      showJSON("loginBox", result);
+      showToast("登录成功，正在跳转...", "success");
+      setTimeout(() => {
+        window.location.replace(resolveNextPath());
+      }, 320);
+    }
+
+    document.getElementById("btnLogin").onclick = async () => {
+      const button = document.getElementById("btnLogin");
+      button.disabled = true;
+      try {
+        await doLogin();
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        showToast(message, "error");
+        showJSON("loginBox", { code: -1, message });
+      } finally {
+        button.disabled = false;
+      }
+    };
+
+    tryResumeSession();
+  </script>
+</body>
+</html>

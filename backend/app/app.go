@@ -18,6 +18,7 @@ import (
 	"bilibililivetools/gover/backend/config"
 	"bilibililivetools/gover/backend/logging"
 	"bilibililivetools/gover/backend/router"
+	authsvc "bilibililivetools/gover/backend/service/auth"
 	"bilibililivetools/gover/backend/service/bilibili"
 	ffsvc "bilibililivetools/gover/backend/service/ffmpeg"
 	"bilibililivetools/gover/backend/service/integration"
@@ -60,6 +61,7 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 
 	ffmpegSvc := ffsvc.New(cfg.FFmpegPath, cfg.FFprobePath)
 	bilibiliSvc := bilibili.New(storeDB, cfg)
+	authService := authsvc.New(storeDB, 24*time.Hour)
 	maintenanceSvc := maintenance.New(storeDB)
 	monitorSvc := monitor.New(storeDB, cfg.LogBufferSize)
 	onvifSvc := onvif.New()
@@ -76,6 +78,7 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 		Config:      cfg,
 		ConfigMgr:   cfgManager,
 		Store:       storeDB,
+		Auth:        authService,
 		FFmpeg:      ffmpegSvc,
 		Stream:      streamMgr,
 		Bilibili:    bilibiliSvc,

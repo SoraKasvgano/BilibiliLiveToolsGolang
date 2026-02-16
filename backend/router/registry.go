@@ -12,6 +12,7 @@ import (
 
 	"bilibililivetools/gover/backend/config"
 	"bilibililivetools/gover/backend/httpapi"
+	authsvc "bilibililivetools/gover/backend/service/auth"
 	"bilibililivetools/gover/backend/service/bilibili"
 	ffsvc "bilibililivetools/gover/backend/service/ffmpeg"
 	"bilibililivetools/gover/backend/service/integration"
@@ -26,6 +27,7 @@ type Dependencies struct {
 	Config      config.Config
 	ConfigMgr   *config.Manager
 	Store       *store.Store
+	Auth        *authsvc.Service
 	FFmpeg      *ffsvc.Service
 	Stream      *stream.Manager
 	Bilibili    bilibili.Service
@@ -68,6 +70,9 @@ func Build(deps *Dependencies) (http.Handler, []Route) {
 	r.Use(middleware.Recoverer)
 	r.Use(httpapi.CORS(deps.Config.AllowOrigin))
 	r.Use(httpapi.Logging)
+	if deps.Auth != nil {
+		r.Use(httpapi.AuthRequired(deps.Auth, deps.Config.APIBase))
+	}
 
 	routes := make([]Route, 0, 128)
 	modules := instantiateModules(deps)

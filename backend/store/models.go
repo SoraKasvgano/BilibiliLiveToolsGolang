@@ -594,3 +594,21 @@ type MyLiveRoomInfo struct {
 		AuditTitle string `json:"audit_title"`
 	} `json:"audit_info"`
 }
+
+// ---------- Admin ----------
+
+type AdminUser struct {
+	ID           int64     `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type AdminSession struct {
+	ID        int64     `json:"id"`
+	UserID    int64     `json:"userId"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	CreatedAt time.Time `json:"createdAt"`
+}

@@ -8,11 +8,36 @@ function setBox(id, value) {
   el.textContent = typeof value === "string" ? value : pretty(value);
 }
 
+const ADMIN_TOKEN_KEY = "gover_admin_token";
+const ADMIN_LOGIN_PATH = "/app/pages/admin-login.html";
+let pollEnabled = false;
+
+function getAdminToken() {
+  return (localStorage.getItem(ADMIN_TOKEN_KEY) || "").trim();
+}
+
+function clearAdminToken() {
+  localStorage.removeItem(ADMIN_TOKEN_KEY);
+  localStorage.removeItem("gover_admin_user");
+}
+
+function redirectToAdminLogin() {
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  const next = encodeURIComponent(current || "/app/index.html");
+  window.location.replace(`${ADMIN_LOGIN_PATH}?next=${next}`);
+}
+
 async function request(path, options = {}) {
+  const opts = options || {};
+  const headers = new Headers(opts.headers || {});
+  const token = getAdminToken();
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
   const response = await fetch(path, {
-    method: options.method || "GET",
-    headers: options.headers || {},
-    body: options.body,
+    method: opts.method || "GET",
+    headers,
+    body: opts.body,
   });
   const text = await response.text();
   let data;
@@ -20,6 +45,11 @@ async function request(path, options = {}) {
     data = JSON.parse(text);
   } catch {
     data = { code: -1, message: text || "Non-JSON response" };
+  }
+  const unauthorized = response.status === 401 || Number(data.code || 0) === -401;
+  if (unauthorized && !opts.noAuthRedirect) {
+    clearAdminToken();
+    redirectToAdminLogin();
   }
   if (!response.ok) {
     throw new Error(data.message || `HTTP ${response.status}`);
@@ -37,6 +67,25 @@ function apiPost(path, payload) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload || {}),
   });
+}
+
+async function ensureAuthenticated() {
+  const token = getAdminToken();
+  if (!token) {
+    redirectToAdminLogin();
+    return false;
+  }
+  try {
+    const result = await request("/api/v1/auth/status", { noAuthRedirect: true });
+    if (result && result.data && result.data.authenticated) {
+      return true;
+    }
+  } catch {
+    // Ignore and treat as unauthenticated.
+  }
+  clearAdminToken();
+  redirectToAdminLogin();
+  return false;
 }
 
 function asNumber(id, fallback = 0) {
@@ -776,8 +825,14 @@ async function downloadAdvancedStats(format) {
   const granularity = encodeURIComponent(asString("advancedStatsGranularity") || "hour");
   const fields = encodeURIComponent(asString("advancedExportFields"));
   const maxRows = asNumber("advancedExportMaxRows", 300);
+  const headers = {};
+  const token = getAdminToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   const response = await fetch(
-    `/api/v1/live/stats/advanced/export?hours=${hours}&granularity=${granularity}&format=${encodeURIComponent(format)}&fields=${fields}&maxRows=${maxRows}`
+    `/api/v1/live/stats/advanced/export?hours=${hours}&granularity=${granularity}&format=${encodeURIComponent(format)}&fields=${fields}&maxRows=${maxRows}`,
+    { headers }
   );
   if (!response.ok) {
     const text = await response.text();
@@ -1606,6 +1661,9 @@ function bindActions() {
 }
 
 async function init() {
+  const authOK = await ensureAuthenticated();
+  if (!authOK) return;
+
   bindActions();
   applyAdvancedExportPreset(asString("advancedExportPreset") || "all", true);
   window.addEventListener("message", (event) => {
@@ -1637,6 +1695,7 @@ async function init() {
   await refreshMaintenanceSetting();
   await refreshMaintenanceStatus();
   drawAdvancedStatsCharts(latestAdvancedStats);
+  pollEnabled = true;
 }
 
 init().catch((error) => {
@@ -1645,9 +1704,11 @@ init().catch((error) => {
 });
 
 setInterval(() => {
+  if (!pollEnabled) return;
   refreshAccount().catch(() => {});
 }, 3000);
 
 setInterval(() => {
+  if (!pollEnabled) return;
   refreshMaintenanceStatus().catch(() => {});
 }, 5000);
