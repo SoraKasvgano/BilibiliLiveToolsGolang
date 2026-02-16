@@ -27,20 +27,20 @@ Go rewrite of BilibiliLiveTools (backend + frontend), focused on Bilibili live s
 - Provider 入站能力：支持 `/integration/provider/inbound/{provider}` 的签名鉴权 + 防重放 + 命令入队（自定义 HMAC + Telegram/DingTalk 官方签名可选）。
 - Monitor 能力：支持真实 SMTP 测试邮件发送（SSL/STARTTLS）与运行日志查询。
 - 运维能力：配置文件优先、自动生成配置、热加载、离线 Swagger UI。
+- 管理员鉴权：支持 admin 登录会话 + API token 双通道鉴权；默认账号 `admin/admin`，支持登录后修改密码。
 
 ## 3. 目录结构
 
 ```text
-gover/
-  backend/                # Go 后端
-  frontend/               # 前端资源（app / swagger / legacy / pages）
-  ffmpeg/                 # 内置 ffmpeg 二进制
-  main.go                 # 程序入口（embed 前端）
-  build.sh                # Linux/macOS 一键构建
-  build.bat               # Windows 一键构建
-  Dockerfile
-  docker-compose.yml
-  docker-update.sh        # Linux 一键更新容器
+backend/                # Go 后端
+frontend/               # 前端资源（app / swagger / legacy / pages）
+ffmpeg/                 # 内置 ffmpeg 二进制
+main.go                 # 程序入口（embed 前端）
+build.sh                # Linux/macOS 一键构建
+build.bat               # Windows 一键构建
+Dockerfile
+docker-compose.yml
+docker-update.sh        # Linux 一键更新容器
 ```
 
 ## 4. 本地开发运行
@@ -53,7 +53,6 @@ gover/
 ### 4.2 启动
 
 ```bash
-cd gover
 go run .
 ```
 
@@ -62,6 +61,7 @@ go run .
 启动后可访问：
 
 - 功能首页：`http://127.0.0.1:18686/`
+- 管理员登录页：`http://127.0.0.1:18686/app/pages/admin-login.html`
 - 1:1 扫码登录页：`http://127.0.0.1:18686/app/pages/login.html`
 - 高级控制台：`http://127.0.0.1:18686/app/index.html`
 - Swagger：`http://127.0.0.1:18686/swagger/`
@@ -110,18 +110,16 @@ export GOVER_CONFIG_FILE=/path/to/config.json
 ### 6.1 Windows
 
 ```powershell
-cd gover
 .\build.bat
 ```
 
 ### 6.2 Linux/macOS
 
 ```bash
-cd gover
 ./build.sh
 ```
 
-默认输出到 `gover/dist`，文件名示例：
+默认输出到 `dist/`，文件名示例：
 
 - `BilibiliLiveToolsGover_windows_amd64.exe`
 - `BilibiliLiveToolsGover_linux_amd64`
@@ -146,7 +144,6 @@ $env:APP_NAME='MyLiveTool'
 先生成 Linux amd64 二进制：
 
 ```bash
-cd gover
 ./build.sh
 ```
 
@@ -158,7 +155,6 @@ cd gover
 ### 7.2 构建与启动
 
 ```bash
-cd gover
 docker compose up -d --build
 ```
 
@@ -183,7 +179,6 @@ docker compose up -d --build
 - 启动新容器。
 
 ```bash
-cd gover
 ./docker-update.sh
 ```
 
@@ -193,9 +188,55 @@ cd gover
 - `IMAGE_NAME`（默认 `gover:latest`）
 - `APP_NAME`（配合 compose build args，默认 `BilibiliLiveToolsGover`）
 
-## 8. 常用接口
+## 8. 管理员鉴权与 API Token 兼容
+
+### 8.1 鉴权方式（双通道）
+
+当前后端 API 默认开启鉴权（白名单除外），支持两种访问方式：
+
+1. 管理员登录会话（推荐用于前端）
+   - 登录：`POST /api/v1/auth/login`
+   - 退出：`POST /api/v1/auth/logout`
+   - 状态：`GET /api/v1/auth/status`
+   - 改密：`POST /api/v1/auth/password`
+   - 登录成功后使用 `Authorization: Bearer <session_token>`
+2. API token（兼容已有自动化脚本）
+   - 优先从 `X-API-Key` 读取；
+   - 若无 `X-API-Key`，也支持 `Authorization: Bearer <api_token>` 回退匹配。
+
+`/api/v1/auth/status` 会返回 `mode` 字段：
+
+- `admin_session`：管理员会话模式
+- `api_key`：API token 模式
+
+### 8.2 初始管理员账号
+
+- 默认账号：`admin`
+- 默认密码：`admin`
+
+首次部署建议：
+
+1. 先登录管理员页；
+2. 立即修改密码（会使该用户所有旧会话失效并强制重新登录）。
+
+### 8.3 API token 兼容 key 名
+
+为兼容历史调用，后端会从 `api_key_settings` 中按以下名称匹配 token：
+
+- `api_access_token`
+- `admin_api_token`
+- `api_token`
+- `bilibili`（历史兼容）
+
+注意：
+
+- 未携带任何 token 的旧脚本在开启鉴权后会返回 401；
+- 旧脚本只要改为携带上述任一已配置 token，即可继续调用。
+
+## 9. 常用接口
 
 - 健康检查：`GET /api/v1/health`
+- 鉴权：`POST /api/v1/auth/login|logout`、`GET /api/v1/auth/status`、`POST /api/v1/auth/password`
 - 推流设置：`GET/POST /api/v1/push/setting`
 - 推流控制：`POST /api/v1/push/start|stop|restart`
 - 推流状态：`GET /api/v1/push/status`
@@ -221,7 +262,7 @@ cd gover
 - Monitor 运行日志：`GET /api/v1/monitor/status`
 - 数据维护：`/api/v1/maintenance/*`
 
-### 8.1 provider 入站签名说明（简版）
+### 9.1 provider 入站签名说明（简版）
 
 入站接口：`POST /api/v1/integration/provider/inbound/{provider}`
 
@@ -243,7 +284,7 @@ cd gover
 - API Key：`provider_inbound_whitelist`
 - 值格式：逗号分隔 `IP/CIDR`，例如 `127.0.0.1,10.0.0.0/8,192.168.1.0/24`
 
-### 8.2 HTTP 轮询消费器字段映射（configJson）
+### 9.2 HTTP 轮询消费器字段映射（configJson）
 
 `provider=http_polling` 时，`configJson` 支持按真实接口差异配置：
 
@@ -278,7 +319,7 @@ cd gover
 }
 ```
 
-## 9. 注意事项
+## 10. 注意事项
 
 - SQLite 已开启外键及并发优化参数；清理后可通过 VACUUM 压缩数据库体积。
 - 长时间运行时可配合维护清理任务与 `runtime/memory` 接口观察内存/任务堆积趋势。
