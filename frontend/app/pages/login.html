@@ -1,74 +1,89 @@
-<!DOCTYPE html>
-<html class="no-js" lang="zh-CN">
+<!doctype html>
+<html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>扫码登录 - BilibiliLiveToolsGover</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="shortcut icon" href="/legacy/favicon.ico">
-  <link rel="stylesheet" href="/legacy/account/css/bootstrap.min.css">
-  <link rel="stylesheet" href="/legacy/account/css/animate.css">
-  <link rel="stylesheet" href="/legacy/account/css/style.css">
-  <script src="/legacy/account/js/modernizr-2.6.2.min.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>扫码登录</title>
+  <link rel="stylesheet" href="/app/pages/shared.css" />
 </head>
-<body class="style-3">
-  <div class="container">
-    <div class="row" style="padding-top: 12px;">
-      <div class="col-md-4 col-md-offset-4 text-center">
-        <a href="/app/pages/home.html" style="color:#fff;text-decoration:underline;">返回功能首页</a>
+<body>
+  <header class="shared-header">
+    <div id="sharedNav"></div>
+  </header>
+  <main class="page-shell">
+    <section class="page-card">
+      <h1>扫码登录</h1>
+      <p class="soft-note">请用手机 Bilibili App 扫描二维码登录。登录成功后会自动同步 Cookie。</p>
+      <div id="roleTip" class="role-tip"></div>
+
+      <div class="status-line">
+        <strong>登录状态:</strong>
+        <span id="loginStatusBadge" class="badge badge-neutral">加载中</span>
       </div>
-    </div>
-    <div class="row">
-      <div class="col-md-4 col-md-offset-4">
-        <div class="fh5co-form animate-box" data-animate-effect="fadeInRight">
-          <div class="form-group text-center">
-            <div style="margin-top: 10px"></div>
-            <img src="" alt="登录二维码" width="300" height="300" id="loginImg" style="display: none;">
-            <p style="font-size: 18px" id="info">加载中，请稍后...</p>
-            <p style="font-size: 12px;color:#ddd;word-break:break-all;" id="apiDebug"></p>
+
+      <div class="preview-panel" style="text-align:center;">
+        <img id="qrImage" alt="登录二维码" style="display:none;max-width:340px;margin:0 auto;" />
+        <div id="qrPlaceholder" class="empty-hint">点击“生成二维码”开始扫码登录。</div>
+        <div style="margin-top:10px;">
+          <div class="progress-bar">
+            <span id="qrProgressValue" class="progress-value" style="width:0%;"></span>
           </div>
-          <div class="form-group" id="qrCodeLoginBtn">
-            <p style="margin-left:10px">
-              拿出你的手机/Pad，打开哔哩哔哩 APP，扫码登录。
-              <a href="javascript:loginByQrCode()">二维码登录？</a>
-            </p>
-            <p class="text-center" style="margin-top:8px;">
-              <button id="btnGenerateQr" class="btn btn-primary" type="button" onclick="loginByQrCode()">立即生成二维码</button>
-            </p>
-          </div>
+          <div id="qrProgressText" class="soft-note">等待二维码生成...</div>
         </div>
       </div>
-    </div>
-    <div class="row" style="padding-top: 60px; clear: both;">
-      <div class="col-md-12 text-center">
-        <p><small>BilibiliLiveToolsGover - QR Login</small></p>
-      </div>
-    </div>
-  </div>
 
-  <script src="/legacy/account/js/jquery.min.js"></script>
-  <script src="/legacy/account/js/bootstrap.min.js"></script>
-  <script src="/legacy/account/js/jquery.placeholder.min.js"></script>
-  <script src="/legacy/account/js/jquery.waypoints.min.js"></script>
-  <script src="/legacy/account/js/main.js"></script>
-  <script src="/legacy/lib/layer/layer.js"></script>
+      <div class="actions">
+        <button id="btnGenerateQr" class="btn-success">生成二维码</button>
+        <button id="btnRefreshStatus">刷新状态</button>
+        <button id="btnOpenHome" class="btn-ghost">返回功能首页</button>
+      </div>
+      <pre id="loginBox">{}</pre>
+    </section>
+  </main>
+
+  <script src="/app/pages/shared.js"></script>
   <script>
+    const {
+      initPage,
+      requestJSON,
+      showJSON,
+      bindAction,
+      statusBadge,
+      showToast,
+      createPoller
+    } = window.GoverShared;
+    initPage({ active: "login" });
+
     const popupParams = new URLSearchParams(window.location.search);
     const autoCloseEnabled = popupParams.get("autoclose") === "1";
-    let autoGenerateAttempted = false;
-    let generateInFlight = false;
-    let statusInFlight = false;
-    let bootstrapped = false;
-    let fallbackTriggered = false;
-    let updateTimer = null;
-    let bootstrapTimer = null;
+    let qrMaxAge = 180;
+    let loginCompleted = false;
 
-    function setInfo(content) {
-      $("#info").html(content);
+    function setStatusBadge(text, type) {
+      const old = document.getElementById("loginStatusBadge");
+      if (!old) return;
+      old.outerHTML = statusBadge(text, type).replace("<span", '<span id="loginStatusBadge"');
     }
 
-    function setDebug(content) {
-      $("#apiDebug").text(content || "");
+    function setProgress(effectiveTime) {
+      const ttl = Number(effectiveTime || 0);
+      const pct = qrMaxAge > 0 ? Math.max(0, Math.min(100, Math.round((ttl / qrMaxAge) * 100))) : 0;
+      document.getElementById("qrProgressValue").style.width = `${pct}%`;
+      document.getElementById("qrProgressText").textContent = ttl > 0 ? `二维码剩余有效期 ${ttl} 秒` : "二维码已失效，请重新生成";
+    }
+
+    function showQRCode(imageBase64) {
+      const img = document.getElementById("qrImage");
+      const hint = document.getElementById("qrPlaceholder");
+      if (!imageBase64) {
+        img.style.display = "none";
+        img.src = "";
+        hint.style.display = "";
+        return;
+      }
+      img.src = imageBase64;
+      img.style.display = "block";
+      hint.style.display = "none";
     }
 
     function notifyLoginSuccess(data) {
@@ -93,172 +108,94 @@
     }
 
     function handleLoginSuccess(data) {
-      setInfo("【<span style=\"color:green;\">登录成功</span>】<br />正在同步并关闭窗口...");
-      setDebug("登录状态已确认，准备关闭/跳转。");
+      if (loginCompleted) return;
+      loginCompleted = true;
+      setStatusBadge("已登录", "success");
+      setProgress(0);
+      showToast("扫码登录成功，Cookie 已同步", "success");
       notifyLoginSuccess(data || {});
-      const shouldAutoClose = autoCloseEnabled || (window.opener && !window.opener.closed);
-      if (shouldAutoClose) {
-        setTimeout(function () {
+      if (autoCloseEnabled || (window.opener && !window.opener.closed)) {
+        setTimeout(() => {
           if (!tryCloseWindow()) {
             window.location.replace("/app/pages/home.html");
           }
-        }, 500);
-        return;
-      }
-      setInfo("【<span style=\"color:green;\">登录成功</span>】<br />Cookie 已同步。若需重新扫码可点击“立即生成二维码”。");
-      setDebug("已登录（非弹窗模式），为避免误跳转，页面保持当前状态。");
-    }
-
-    function hideQrCode() {
-      $("#loginImg").attr("src", "");
-      $("#loginImg").hide();
-    }
-
-    function renderQrStatus(qrStatus) {
-      if (!qrStatus) {
-        hideQrCode();
-        return;
-      }
-      if (qrStatus.qrCode) {
-        $("#loginImg").attr("src", qrStatus.qrCode);
-        $("#loginImg").show();
-        bootstrapped = true;
-        setDebug("二维码已渲染，长度=" + qrStatus.qrCode.length);
-      }
-      if (qrStatus.isLogged) {
-        handleLoginSuccess({ qrCodeStatus: qrStatus });
-        return;
-      }
-      if (qrStatus.qrCodeEffectiveTime <= 0) {
-        setInfo("【<span style=\"color:red;\">二维码已失效</span>】<br />请重新点击二维码登录");
-        return;
-      }
-      if (qrStatus.isScaned) {
-        setInfo("【<span style=\"color:green;\">已扫码</span>】<br />二维码剩余有效期<span style=\"color:green;\">" + qrStatus.qrCodeEffectiveTime + "</span>秒");
-      } else {
-        setInfo("【<span style=\"color:red;\">未扫码</span>】<br />二维码剩余有效期<span style=\"color:green;\">" + qrStatus.qrCodeEffectiveTime + "</span>秒");
+        }, 600);
       }
     }
 
-    function loginByQrCode() {
-      if (generateInFlight) return;
-      generateInFlight = true;
-      const button = document.getElementById("btnGenerateQr");
-      if (button) button.disabled = true;
-      setInfo("正在生成二维码，请稍后...");
-      setDebug("调用 /api/v1/account/login/qrcode/start ...");
-      $.ajax({
-        type: "post",
-        url: "/api/v1/account/login/qrcode/start",
-        cache: false,
-        contentType: "application/json",
-        data: "{}",
-        timeout: 12000,
-        success: function (resp) {
-          generateInFlight = false;
-          if (button) button.disabled = false;
-          if (!resp) {
-            layer.msg("登录失败，返回数据为空", { icon: 5 });
-            setInfo("<span style=\"color:red;\">二维码生成失败：返回为空</span>");
-            setDebug("qrcode/start 返回为空。");
-            return;
-          }
-          if (resp.code !== 0) {
-            layer.msg(resp.message || "生成二维码失败", { icon: 2 });
-            setInfo("<span style=\"color:red;\">二维码生成失败：" + (resp.message || "unknown") + "</span>");
-            setDebug("qrcode/start 失败 code=" + resp.code + " msg=" + (resp.message || "unknown"));
-            return;
-          }
-          autoGenerateAttempted = true;
-          renderQrStatus(resp.data || {});
-          setDebug("qrcode/start 成功 code=0");
-          layer.msg("二维码已生成，请扫码登录", { icon: 1 });
-        },
-        error: function (xhr) {
-          generateInFlight = false;
-          if (button) button.disabled = false;
-          layer.msg("登录失败: " + (xhr.responseText || xhr.statusText || "unknown"), { icon: 5 });
-          setInfo("<span style=\"color:red;\">二维码生成失败：" + (xhr.responseText || xhr.statusText || "unknown") + "</span>");
-          setDebug("qrcode/start 请求失败 status=" + (xhr.status || "unknown"));
+    function renderStatusPayload(payload) {
+      const data = payload || {};
+      const status = Number(data.status || 0);
+      const qr = data.qrCodeStatus || {};
+      if (status === 3 || qr.isLogged) {
+        showQRCode("");
+        handleLoginSuccess(data);
+        return;
+      }
+      if (status === 1) {
+        setStatusBadge("未登录", "danger");
+        setProgress(0);
+        showQRCode("");
+        return;
+      }
+      if (status === 4) {
+        setStatusBadge("加载中", "info");
+        return;
+      }
+      if (status === 2 || qr.qrCode) {
+        if (qr.qrCode) {
+          showQRCode(qr.qrCode);
         }
-      });
-    }
-
-    function update() {
-      if (statusInFlight) return;
-      statusInFlight = true;
-      $.ajax({
-        type: "get",
-        url: "/api/v1/account/status",
-        cache: false,
-        dataType: "json",
-        timeout: 7000,
-        success: function (resp) {
-          statusInFlight = false;
-          if (!resp) {
-            setInfo("<span style=\"color:red;\">返回参数为空</span>");
-            setDebug("account/status 返回为空。");
-            return;
-          }
-          if (resp.code !== 0) {
-            setInfo("<span style=\"color:red;\">状态查询失败：" + (resp.message || "unknown") + "</span>");
-            setDebug("account/status 失败 code=" + resp.code + " msg=" + (resp.message || "unknown"));
-            if (!autoGenerateAttempted) {
-              autoGenerateAttempted = true;
-              loginByQrCode();
-            }
-            return;
-          }
-          const data = resp.data || {};
-          setDebug("account/status=" + (data.status || 0) + (data.message ? " " + data.message : ""));
-          if (data.status === 3) {
-            handleLoginSuccess(data);
-            return;
-          }
-          if (data.status === 1) {
-            hideQrCode();
-            setInfo("<span style=\"color:red;\">未登录，正在准备二维码...</span>");
-            if (!autoGenerateAttempted) {
-              autoGenerateAttempted = true;
-              loginByQrCode();
-            }
-            return;
-          }
-          if (data.status === 2) {
-            renderQrStatus(data.qrCodeStatus || {});
-            return;
-          }
-          if (data.status === 4) {
-            hideQrCode();
-            setInfo("加载中，请稍后...");
-            return;
-          }
-          hideQrCode();
-          setInfo("<span style=\"color:red;\">未知的登录状态</span>");
-        },
-        error: function (xhr) {
-          statusInFlight = false;
-          setInfo("<span style=\"color:red;\">状态轮询失败：" + (xhr.responseText || xhr.statusText || "unknown") + "</span>");
-          setDebug("account/status 请求失败 status=" + (xhr.status || "unknown"));
-          if (!autoGenerateAttempted) {
-            autoGenerateAttempted = true;
-            loginByQrCode();
-          }
+        const ttl = Number(qr.qrCodeEffectiveTime || 0);
+        if (ttl > qrMaxAge) qrMaxAge = ttl;
+        if (ttl <= 0) {
+          setStatusBadge("二维码失效", "neutral");
+          setProgress(0);
+          return;
         }
+        setProgress(ttl);
+        if (qr.isScaned) {
+          setStatusBadge("已扫码", "success");
+        } else {
+          setStatusBadge("等待扫码", "danger");
+        }
+        return;
+      }
+      setStatusBadge("未知状态", "warning");
+    }
+
+    async function generateQRCode() {
+      loginCompleted = false;
+      const result = await requestJSON("/api/v1/account/login/qrcode/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}"
       });
+      showJSON("loginBox", result);
+      renderStatusPayload({ status: 2, qrCodeStatus: result.data || {} });
+      return result;
     }
 
-    function bootstrapQrFallback() {
-      if (bootstrapped || fallbackTriggered || autoGenerateAttempted) return;
-      fallbackTriggered = true;
-      autoGenerateAttempted = true;
-      setDebug("status 轮询未及时返回，触发二维码直连生成。");
-      loginByQrCode();
+    async function refreshStatus() {
+      const result = await requestJSON("/api/v1/account/status");
+      showJSON("loginBox", result);
+      renderStatusPayload(result.data || {});
+      return result;
     }
 
-    bootstrapTimer = setTimeout(bootstrapQrFallback, 1800);
-    updateTimer = setInterval(update, 1200);
-    update();
+    bindAction("btnGenerateQr", generateQRCode, "loginBox");
+    bindAction("btnRefreshStatus", refreshStatus, "loginBox", { successToast: false });
+    bindAction("btnOpenHome", async () => {
+      window.location.href = "/app/pages/home.html";
+      return { code: 0, message: "正在返回功能首页..." };
+    }, "loginBox");
+
+    const poller = createPoller(refreshStatus, 1200);
+    poller.start();
+    generateQRCode().catch((error) => {
+      showJSON("loginBox", { code: -1, message: error.message || String(error) });
+      setStatusBadge("生成失败", "danger");
+    });
   </script>
 </body>
 </html>

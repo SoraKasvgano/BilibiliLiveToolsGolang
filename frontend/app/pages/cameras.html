@@ -15,6 +15,20 @@
       <h1>摄像头管理</h1>
       <p class="soft-note">按普通用户流程：先发现设备 → 补充账号密码 → 一键保存 → 推流/拼屏直接复用。</p>
       <div id="roleTip" class="role-tip"></div>
+      <div class="stepper">
+        <div id="cameraStep1" class="stepper-item active">
+          <span>① 发现设备</span>
+          <span class="badge badge-info">进行中</span>
+        </div>
+        <div id="cameraStep2" class="stepper-item">
+          <span>② 保存到库</span>
+          <span class="badge badge-neutral">待完成</span>
+        </div>
+        <div id="cameraStep3" class="stepper-item">
+          <span>③ 套用推流</span>
+          <span class="badge badge-neutral">待完成</span>
+        </div>
+      </div>
     </section>
 
     <section class="page-card">
@@ -197,11 +211,13 @@
 
   <script src="/app/pages/shared.js"></script>
   <script>
-    const { initPage, requestJSON, showJSON, bindAction } = window.GoverShared;
+    const { initPage, requestJSON, showJSON, bindAction, showConfirm, statusBadge, markFields, setPanelVisible } = window.GoverShared;
     initPage({ active: "cameras" });
 
     const rowsCache = new Map();
     let cameraPreviewRunning = false;
+    let editingCameraId = 0;
+    let flashCameraId = 0;
 
     function boolValue(id) {
       return String(document.getElementById(id).value || "").toLowerCase() === "true";
@@ -232,15 +248,16 @@
 
     function switchTypePanels() {
       const type = textValue("cameraType");
-      document.getElementById("panelRTSP").style.display = type === "rtsp" ? "" : "none";
-      document.getElementById("panelMJPEG").style.display = type === "mjpeg" ? "" : "none";
-      document.getElementById("panelONVIF").style.display = type === "onvif" ? "" : "none";
-      document.getElementById("panelUSB").style.display = type === "usb" ? "" : "none";
+      setPanelVisible("panelRTSP", type === "rtsp");
+      setPanelVisible("panelMJPEG", type === "mjpeg");
+      setPanelVisible("panelONVIF", type === "onvif");
+      setPanelVisible("panelUSB", type === "usb");
     }
 
     function fillForm(item) {
       const data = item || {};
       document.getElementById("cameraId").value = data.id || "";
+      editingCameraId = Number(data.id || 0);
       document.getElementById("cameraName").value = data.name || "";
       document.getElementById("cameraType").value = sourceTypeOf(data) || "rtsp";
       document.getElementById("cameraEnabled").value = data.enabled === false ? "false" : "true";
@@ -256,6 +273,8 @@
       document.getElementById("cameraUsbResolution").value = data.usbDeviceResolution || "1280x720";
       document.getElementById("cameraUsbFps").value = String(data.usbDeviceFramerate || 30);
       switchTypePanels();
+      renderTable({ data: Array.from(rowsCache.values()) });
+      markFields(["cameraName", "cameraType"]);
     }
 
     function collectPayload() {
@@ -280,6 +299,7 @@
 
     function resetForm(type) {
       stopCameraPreview();
+      editingCameraId = 0;
       fillForm({
         id: 0,
         sourceType: type || textValue("cameraType") || "rtsp",
@@ -294,15 +314,28 @@
       body.innerHTML = "";
       rowsCache.clear();
       const rows = (pageResult && pageResult.data) || [];
+      if (!rows.length) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = '<td colspan="7"><div class="table-empty">暂无摄像头，请先在上方填写后点击“保存到摄像头库”。</div></td>';
+        body.appendChild(tr);
+        return;
+      }
       for (const item of rows) {
         rowsCache.set(item.id, item);
         const tr = document.createElement("tr");
+        if (Number(item.id) === editingCameraId) {
+          tr.classList.add("row-editing");
+        }
+        if (Number(item.id) === flashCameraId) {
+          tr.classList.add("row-updated");
+        }
+        const stateBadge = item.enabled ? statusBadge("启用", "success") : statusBadge("停用", "neutral");
         tr.innerHTML = `
           <td>${item.id}</td>
           <td>${item.name || ""}</td>
           <td>${item.sourceType || ""}</td>
           <td>${streamHint(item) || ""}</td>
-          <td>${item.enabled ? "启用" : "停用"}</td>
+          <td>${stateBadge}</td>
           <td>${item.updatedAt || ""}</td>
           <td><button data-id="${item.id}" class="btn-mini">编辑</button></td>
         `;
@@ -313,9 +346,30 @@
           const id = Number(btn.getAttribute("data-id"));
           const item = rowsCache.get(id);
           stopCameraPreview();
+          setStepState(2, false);
           fillForm(item || {});
         };
       });
+    }
+
+    function setStepState(step, done) {
+      const target = document.getElementById(`cameraStep${step}`);
+      if (!target) return;
+      target.classList.remove("active", "done");
+      const badge = target.querySelector(".badge");
+      if (done) {
+        target.classList.add("done");
+        if (badge) {
+          badge.className = "badge badge-success";
+          badge.textContent = "已完成";
+        }
+      } else {
+        target.classList.add("active");
+        if (badge) {
+          badge.className = "badge badge-info";
+          badge.textContent = "进行中";
+        }
+      }
     }
 
     function setPreviewInfo(text) {
@@ -375,7 +429,10 @@
       });
       showJSON("cameraBox", result);
       if (result.data) {
+        flashCameraId = Number(result.data.id || 0);
         fillForm(result.data);
+        setStepState(1, true);
+        setStepState(2, true);
       }
       await loadList();
     }
@@ -383,6 +440,11 @@
     async function deleteCurrentCamera() {
       const id = numberValue("cameraId", 0);
       if (!id) throw new Error("请先选择要删除的摄像头");
+      const name = textValue("cameraName") || `ID=${id}`;
+      const confirmed = await showConfirm("删除摄像头", `确定删除摄像头「${name}」吗？此操作不可撤销。`);
+      if (!confirmed) {
+        return { code: 0, message: "已取消删除" };
+      }
       const result = await requestJSON("/api/v1/cameras/delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -390,6 +452,8 @@
       });
       showJSON("cameraBox", result);
       resetForm("rtsp");
+      setStepState(2, false);
+      setStepState(3, false);
       await loadList();
     }
 
@@ -402,6 +466,7 @@
         body: "{}"
       });
       showJSON("cameraBox", result);
+      setStepState(3, true);
     }
 
     async function discoverOnvif() {
@@ -418,6 +483,7 @@
         opt.textContent = `${endpoint}${item.from ? ` (${item.from})` : ""}`;
         list.appendChild(opt);
       }
+      setStepState(1, true);
     }
 
     async function probeOnvifProfiles() {
@@ -453,6 +519,7 @@
         opt.textContent = name;
         list.appendChild(opt);
       }
+      setStepState(1, true);
     }
 
     document.getElementById("cameraType").onchange = switchTypePanels;

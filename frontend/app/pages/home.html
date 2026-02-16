@@ -12,44 +12,143 @@
   </header>
   <main class="page-shell">
     <section class="page-card">
-      <h1>功能导航（按业务分区）</h1>
+      <h1>欢迎使用 Gover（普通用户模式）</h1>
+      <p class="soft-note">先完成下面 3 步，就可以从摄像头一路推流到 B 站。</p>
       <div id="roleTip" class="role-tip"></div>
+
+      <div id="quickSteps" class="stepper">
+        <div id="stepLogin" class="stepper-item">
+          <span>① 登录账号</span>
+          <span class="badge badge-neutral">未完成</span>
+        </div>
+        <div id="stepCamera" class="stepper-item">
+          <span>② 添加摄像头</span>
+          <span class="badge badge-neutral">未完成</span>
+        </div>
+        <div id="stepPush" class="stepper-item">
+          <span>③ 开始推流</span>
+          <span class="badge badge-neutral">未完成</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="page-card">
+      <h2>功能导航（按业务分区）</h2>
       <div class="menu-grid">
         <a class="menu-card" href="/app/pages/login.html">
-          <h3>账号登录</h3>
-          <p>1:1 扫码登录交互，显示二维码、扫码状态、剩余有效期。</p>
+          <div class="menu-top">
+            <h3><span class="menu-icon">🔐</span> 账号登录</h3>
+            <span id="badgeLogin" class="badge badge-neutral">检查中</span>
+          </div>
+          <p>扫码登录、查看状态、自动刷新 Cookie。</p>
         </a>
         <a class="menu-card" href="/app/pages/cameras.html">
-          <h3>摄像头管理</h3>
-          <p>统一管理 RTSP/MJPEG/ONVIF/USB，支持发现 ONVIF 后保存独立账号密码。</p>
+          <div class="menu-top">
+            <h3><span class="menu-icon">📷</span> 摄像头管理</h3>
+            <span id="badgeCameraCount" class="badge badge-info">0 台</span>
+          </div>
+          <p>统一管理 RTSP/MJPEG/ONVIF/USB，支持保存和预览。</p>
         </a>
         <a class="menu-card" href="/app/pages/push.html">
-          <h3>推流控制</h3>
-          <p>从摄像头库一键套用到推流，开始/停止/重启与状态查看。</p>
+          <div class="menu-top">
+            <h3><span class="menu-icon">📡</span> 推流控制</h3>
+            <span id="badgePush" class="badge badge-neutral">检查中</span>
+          </div>
+          <p>套用摄像头、调整推流参数、控制开始/停止。</p>
         </a>
         <a class="menu-card" href="/app/pages/room.html">
-          <h3>直播间管理</h3>
-          <p>房间号、分区、标题与公告等直播间信息维护。</p>
+          <h3><span class="menu-icon">🏠</span> 直播间管理</h3>
+          <p>维护房间号、分区、标题和公告。</p>
         </a>
         <a class="menu-card" href="/app/pages/material.html">
-          <h3>素材管理</h3>
-          <p>上传/管理视频与音频素材，支撑推流与拼屏配置。</p>
+          <h3><span class="menu-icon">🎬</span> 素材管理</h3>
+          <p>上传视频/音频素材，供推流与拼屏复用。</p>
         </a>
         <a class="menu-card" href="/app/pages/monitor.html">
-          <h3>监控与通知</h3>
-          <p>邮件测试、运行日志查看、告警链路联调。</p>
+          <h3><span class="menu-icon">🔔</span> 监控与通知</h3>
+          <p>邮件配置、告警测试、运行日志查看。</p>
         </a>
         <a class="menu-card" href="/app/index.html">
-          <h3>高级控制台</h3>
-          <p>完整高级配置（集成队列、统计、维护等），适合进阶用户。</p>
+          <h3><span class="menu-icon">🧪</span> 高级控制台</h3>
+          <p>进阶功能入口（集成、统计、维护等）。</p>
         </a>
       </div>
+      <pre id="homeBox">{}</pre>
     </section>
   </main>
 
   <script src="/app/pages/shared.js"></script>
   <script>
-    window.GoverShared.initPage({ active: "home" });
+    const { initPage, requestJSON, showJSON, statusBadge, createPoller } = window.GoverShared;
+    initPage({ active: "home" });
+
+    function setBadge(id, text, type) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.outerHTML = statusBadge(text, type).replace("<span", `<span id="${id}"`);
+    }
+
+    function setStep(id, done, label) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.remove("active", "done");
+      if (done) {
+        el.classList.add("done");
+      } else {
+        el.classList.add("active");
+      }
+      const badge = el.querySelector(".badge");
+      if (!badge) return;
+      badge.className = `badge ${done ? "badge-success" : "badge-neutral"}`;
+      badge.textContent = done ? "✓ 已完成" : label || "未完成";
+    }
+
+    async function refreshHomeStatus() {
+      const [accountResp, pushResp, cameraResp] = await Promise.all([
+        requestJSON("/api/v1/account/status"),
+        requestJSON("/api/v1/push/status"),
+        requestJSON("/api/v1/cameras?page=1&limit=1"),
+      ]);
+
+      const accountStatus = Number(((accountResp || {}).data || {}).status || 0);
+      const loggedIn = accountStatus === 3;
+      setBadge("badgeLogin", loggedIn ? "已登录" : "未登录", loggedIn ? "success" : "danger");
+
+      const pushStatus = Number(((pushResp || {}).data || {}).status || 0);
+      let pushText = "已停止";
+      let pushType = "neutral";
+      if (pushStatus === 3) {
+        pushText = "运行中";
+        pushType = "success";
+      } else if (pushStatus === 1) {
+        pushText = "启动中";
+        pushType = "warning";
+      } else if (pushStatus === 4) {
+        pushText = "重试中";
+        pushType = "warning";
+      }
+      setBadge("badgePush", pushText, pushType);
+
+      const cameraCount = Number((((cameraResp || {}).data || {}).dataCount) || 0);
+      setBadge("badgeCameraCount", `${cameraCount} 台`, cameraCount > 0 ? "info" : "neutral");
+
+      setStep("stepLogin", loggedIn, "未完成");
+      setStep("stepCamera", cameraCount > 0, cameraCount > 0 ? "已完成" : "待添加");
+      setStep("stepPush", pushStatus === 3, pushStatus === 3 ? "已开播" : "待开播");
+
+      showJSON("homeBox", {
+        code: 0,
+        message: "home status updated",
+        data: {
+          accountStatus,
+          cameraCount,
+          pushStatus,
+        },
+      });
+    }
+
+    const poller = createPoller(refreshHomeStatus, 5000);
+    poller.start();
   </script>
 </body>
 </html>

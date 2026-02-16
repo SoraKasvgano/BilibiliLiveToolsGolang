@@ -15,6 +15,11 @@
       <h1>推流配置</h1>
       <p class="soft-note">推荐流程：先在摄像头管理页保存设备，然后在这里一键套用，减少手动输入错误。</p>
       <div id="roleTip" class="role-tip"></div>
+      <div class="status-line">
+        <strong>当前推流状态:</strong>
+        <span id="pushStatusBadge" class="badge badge-neutral">检查中</span>
+        <span id="pushStatusText" class="soft-note">系统正在读取最新状态...</span>
+      </div>
     </section>
 
     <section class="page-card">
@@ -77,11 +82,11 @@
         <label>推流码率预设
           <select id="bitratePreset">
             <option value="auto" selected>自动（跟随质量档位）</option>
-            <option value="2000">流畅 2000 kbps</option>
-            <option value="3500">标准 3500 kbps</option>
-            <option value="5000">高清 5000 kbps</option>
-            <option value="8000">超清 8000 kbps</option>
-            <option value="12000">蓝光 12000 kbps</option>
+            <option value="2000">流畅 2M - 适合手机观看</option>
+            <option value="3500">标准 3.5M - 日常推荐</option>
+            <option value="5000">高清 5M - 画质优先</option>
+            <option value="8000">超清 8M - 高速网络</option>
+            <option value="12000">蓝光 12M - 极高画质</option>
             <option value="custom">自定义</option>
           </select>
         </label>
@@ -138,17 +143,46 @@
         <button id="btnFillAdvancedCmd">按输入类型填充推荐命令</button>
       </div>
       <p class="soft-note">提示：高级模式命令是“手动托管”，切换输入源不会自动强改你已编辑的命令；可点击上方按钮快速生成模板。</p>
+
+      <div class="soft-panel">
+        <h3>本地预览（调试画面，不会推到平台）</h3>
+        <p class="soft-note">建议先在这里确认摄像头/地址有效，再点击“开始推流”。关闭预览会立即释放资源。</p>
+        <div class="grid two">
+          <label>预览宽度（px）
+            <input id="previewWidth" type="number" value="960" min="240" max="1920" />
+          </label>
+          <label>预览帧率（fps）
+            <input id="previewFps" type="number" value="10" min="1" max="20" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnStartLocalPreview">开启本地预览</button>
+          <button id="btnStopLocalPreview">关闭本地预览</button>
+        </div>
+        <div class="preview-panel">
+          <img id="localPreviewImage" alt="推流本地预览画面" />
+          <div id="localPreviewInfo" class="soft-note">本地预览默认关闭，点击“开启本地预览”后按当前配置拉流并显示。</div>
+        </div>
+      </div>
     </section>
 
     <section class="page-card">
       <h2>执行操作</h2>
+      <h3>配置操作</h3>
       <div class="actions">
         <button id="load">读取配置</button>
         <button id="save" data-perm="operator,admin">保存配置</button>
-        <button id="start" data-perm="operator,admin">开始推流</button>
-        <button id="stop" data-perm="operator,admin">停止推流</button>
-        <button id="restart" data-perm="operator,admin">重启推流</button>
+      </div>
+      <h3>推流控制</h3>
+      <div class="actions">
+        <button id="start" class="btn-success btn-lg" data-perm="operator,admin">开始推流</button>
+        <button id="stop" class="btn-danger btn-lg" data-perm="operator,admin">停止推流</button>
+        <button id="restart" class="btn-warning btn-lg" data-perm="operator,admin">重启推流</button>
         <button id="status">读取状态</button>
+      </div>
+      <div class="soft-note">状态每 5 秒自动刷新，你也可以手动点击“读取状态”。</div>
+      <div class="actions">
+        <button id="btnOpenAdvancedConsole" class="btn-ghost">打开高级控制台</button>
       </div>
       <pre id="box">{}</pre>
     </section>
@@ -156,10 +190,11 @@
 
   <script src="/app/pages/shared.js"></script>
   <script>
-    const { initPage, requestJSON, showJSON, bindAction } = window.GoverShared;
+    const { initPage, requestJSON, showJSON, bindAction, showToast, markFields, statusBadge, createPoller, setPanelVisible } = window.GoverShared;
     initPage({ active: "push" });
 
     const cameraMap = new Map();
+    let localPreviewRunning = false;
 
     function asText(id) {
       return String(document.getElementById(id).value || "").trim();
@@ -214,12 +249,49 @@
       return normalizeBitrateKbps(preset);
     }
 
+    function setPushStatusView(statusValue) {
+      const status = Number(statusValue || 0);
+      let text = "已停止";
+      let type = "neutral";
+      let detail = "推流进程当前未运行。";
+      if (status === 3) {
+        text = "运行中";
+        type = "success";
+        detail = "推流正常进行中。";
+      } else if (status === 1) {
+        text = "启动中";
+        type = "warning";
+        detail = "正在启动 FFmpeg 推流进程。";
+      } else if (status === 4) {
+        text = "重试中";
+        type = "warning";
+        detail = "推流失败后等待自动重试。";
+      }
+      const old = document.getElementById("pushStatusBadge");
+      if (old) {
+        old.outerHTML = statusBadge(text, type).replace("<span", '<span id="pushStatusBadge"');
+      }
+      document.getElementById("pushStatusText").textContent = detail;
+    }
+
+    function setLocalPreviewInfo(text) {
+      document.getElementById("localPreviewInfo").textContent = text || "";
+    }
+
+    function stopLocalPreview() {
+      const img = document.getElementById("localPreviewImage");
+      localPreviewRunning = false;
+      img.style.display = "none";
+      img.src = "";
+      setLocalPreviewInfo("本地预览已关闭。");
+    }
+
     function switchInputPanels() {
       const inputType = asText("inputType");
-      document.getElementById("panelRTSP").style.display = inputType === "rtsp" ? "" : "none";
-      document.getElementById("panelMJPEG").style.display = inputType === "mjpeg" ? "" : "none";
-      document.getElementById("panelONVIF").style.display = inputType === "onvif" ? "" : "none";
-      document.getElementById("panelUSB").style.display = inputType === "usb_camera" || inputType === "usb_camera_plus" ? "" : "none";
+      setPanelVisible("panelRTSP", inputType === "rtsp");
+      setPanelVisible("panelMJPEG", inputType === "mjpeg");
+      setPanelVisible("panelONVIF", inputType === "onvif");
+      setPanelVisible("panelUSB", inputType === "usb_camera" || inputType === "usb_camera_plus");
     }
 
     function isUsbTemplateCommand(commandText) {
@@ -333,6 +405,20 @@
       showJSON("box", result);
       if (result && result.data && result.data.pushSetting) {
         fillSetting(result.data.pushSetting);
+        markFields([
+          "inputType",
+          "rtspUrl",
+          "mjpegUrl",
+          "onvifEndpoint",
+          "onvifUsername",
+          "onvifPassword",
+          "onvifProfileToken",
+          "onvifRtspUrl",
+          "usbName",
+          "usbResolution",
+          "usbFramerate",
+        ]);
+        showToast("摄像头已套用到推流配置", "success");
       }
     }
 
@@ -364,6 +450,7 @@
       const result = await requestJSON("/api/v1/push/setting");
       fillSetting(result.data || {});
       showJSON("box", result);
+      await refreshPushStatus(true);
     }
 
     function buildPayload() {
@@ -402,6 +489,42 @@
       showJSON("box", result);
     }
 
+    async function startLocalPreview() {
+      const saveResult = await requestJSON("/api/v1/push/setting", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload())
+      });
+      showJSON("box", saveResult);
+      if (saveResult && Number(saveResult.code) < 0) {
+        throw new Error(saveResult.message || "保存推流配置失败，无法开启本地预览");
+      }
+      const width = Math.max(240, Math.min(1920, asNumber("previewWidth", 960)));
+      const fps = Math.max(1, Math.min(20, asNumber("previewFps", 10)));
+      const img = document.getElementById("localPreviewImage");
+      localPreviewRunning = true;
+      img.style.display = "block";
+      img.onerror = () => {
+        if (!localPreviewRunning) return;
+        setLocalPreviewInfo("本地预览连接失败，请检查输入源信息后重试。");
+      };
+      img.onload = () => {
+        if (!localPreviewRunning) return;
+        setLocalPreviewInfo("本地预览进行中（低帧率用于调试，降低资源占用）");
+      };
+      img.src = `/api/v1/push/preview/mjpeg?width=${width}&fps=${fps}&_ts=${Date.now()}`;
+      setLocalPreviewInfo("正在建立本地预览连接...");
+    }
+
+    async function refreshPushStatus(quiet) {
+      const result = await requestJSON("/api/v1/push/status");
+      if (!quiet) {
+        showJSON("box", result);
+      }
+      setPushStatusView(result && result.data ? result.data.status : 0);
+      return result;
+    }
+
     document.getElementById("inputType").onchange = () => {
       switchInputPanels();
       autoSuggestAdvancedCommand();
@@ -410,13 +533,28 @@
     document.getElementById("bitratePreset").onchange = syncBitrateCustomVisibility;
     document.getElementById("cameraFilterType").onchange = () => loadCameras().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
 
-    bindAction("load", loadSetting, "box");
+    bindAction("load", loadSetting, "box", { successToast: false });
     bindAction("save", saveSetting, "box");
-    bindAction("start", async () => showJSON("box", await requestJSON("/api/v1/push/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })), "box");
-    bindAction("stop", async () => showJSON("box", await requestJSON("/api/v1/push/stop", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })), "box");
-    bindAction("restart", async () => showJSON("box", await requestJSON("/api/v1/push/restart", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })), "box");
-    bindAction("status", async () => showJSON("box", await requestJSON("/api/v1/push/status")), "box");
-    bindAction("btnLoadCameras", loadCameras, "box");
+    bindAction("start", async () => {
+      const result = await requestJSON("/api/v1/push/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      showJSON("box", result);
+      await refreshPushStatus(true);
+      return result;
+    }, "box");
+    bindAction("stop", async () => {
+      const result = await requestJSON("/api/v1/push/stop", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      showJSON("box", result);
+      await refreshPushStatus(true);
+      return result;
+    }, "box");
+    bindAction("restart", async () => {
+      const result = await requestJSON("/api/v1/push/restart", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      showJSON("box", result);
+      await refreshPushStatus(true);
+      return result;
+    }, "box");
+    bindAction("status", () => refreshPushStatus(false), "box", { successToast: false });
+    bindAction("btnLoadCameras", loadCameras, "box", { successToast: false });
     bindAction("btnApplyCamera", applySelectedCamera, "box");
     bindAction("btnOpenCameraPage", async () => {
       window.location.href = "/app/pages/cameras.html";
@@ -425,11 +563,23 @@
       document.getElementById("ffmpegCommand").value = recommendedAdvancedCommand(asText("inputType"));
       showJSON("box", { code: 0, message: "已按当前输入类型填充推荐高级命令" });
     }, "box");
+    bindAction("btnStartLocalPreview", startLocalPreview, "box");
+    bindAction("btnStopLocalPreview", async () => {
+      stopLocalPreview();
+      showJSON("box", { code: 0, message: "已关闭本地预览" });
+    }, "box");
+    bindAction("btnOpenAdvancedConsole", async () => {
+      window.open("/app/index.html", "_blank", "noopener");
+      return { code: 0, message: "已打开高级控制台" };
+    }, "box");
 
     switchInputPanels();
     applyBitratePresetFromValue(0);
+    stopLocalPreview();
     loadSetting().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
     loadCameras().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
+    const statusPoller = createPoller(() => refreshPushStatus(true), 5000);
+    statusPoller.start();
   </script>
 </body>
 </html>

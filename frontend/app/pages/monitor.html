@@ -13,9 +13,12 @@
   <main class="page-shell">
     <section class="page-card">
       <h1>监控与通知</h1>
-      <p class="soft-note">统一管理房间监控、邮件通知和运行状态日志。</p>
+      <p class="soft-note">分成两块设置：房间监控配置 + 邮件通知配置，便于普通用户理解。</p>
       <div id="roleTip" class="role-tip"></div>
+    </section>
 
+    <section class="page-card">
+      <h2>房间监控</h2>
       <div class="grid two">
         <label>启用监控
           <select id="isEnabled">
@@ -29,9 +32,11 @@
       <div class="actions">
         <button id="load">读取配置</button>
         <button id="saveRoom" data-perm="operator,admin">保存房间监控</button>
-        <button id="status">读取状态日志</button>
       </div>
+    </section>
 
+    <section class="page-card">
+      <h2>邮件通知</h2>
       <div class="grid two">
         <label>SMTP服务器<input id="smtpServer" /></label>
         <label>SMTP端口<input id="smtpPort" type="number" value="25" /></label>
@@ -60,7 +65,7 @@
       </div>
       <div class="actions">
         <button id="saveEmail" data-perm="operator,admin">保存邮件配置</button>
-        <button id="testEmail" data-perm="operator,admin">发送测试邮件</button>
+        <button id="testEmail" class="btn-warning" data-perm="operator,admin">发送测试邮件</button>
       </div>
       <div class="grid two">
         <label>测试邮件标题<input id="testSubject" value="[Gover] Monitor test email" /></label>
@@ -75,14 +80,61 @@
       </div>
       <label>测试邮件正文<textarea id="testBody" rows="3">This is a monitor test email from Gover.</textarea></label>
       <label>状态日志条数<input id="statusLimit" type="number" value="100" /></label>
+      <div class="actions">
+        <button id="status">读取状态日志</button>
+      </div>
+    </section>
+
+    <section class="page-card">
+      <h2>运行日志</h2>
+      <div class="table-wrap">
+        <table id="monitorLogTable">
+          <thead>
+            <tr>
+              <th>级别</th>
+              <th>时间</th>
+              <th>消息</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="monitorLogEmpty" class="empty-hint" style="display:none;">暂无运行日志，执行一次“发送测试邮件”后会出现日志。</div>
       <pre id="box">{}</pre>
     </section>
   </main>
 
   <script src="/app/pages/shared.js"></script>
   <script>
-    const { initPage, requestJSON, showJSON, bindAction } = window.GoverShared;
+    const { initPage, requestJSON, showJSON, bindAction, statusBadge } = window.GoverShared;
     initPage({ active: "monitor" });
+
+    function levelBadge(level) {
+      const text = String(level || "").toUpperCase();
+      if (text === "ERROR") return statusBadge("ERROR", "danger");
+      if (text === "WARN") return statusBadge("WARN", "warning");
+      return statusBadge("INFO", "info");
+    }
+
+    function renderLogs(items) {
+      const rows = Array.isArray(items) ? items : [];
+      const body = document.querySelector("#monitorLogTable tbody");
+      body.innerHTML = "";
+      if (!rows.length) {
+        document.getElementById("monitorLogEmpty").style.display = "";
+        return;
+      }
+      document.getElementById("monitorLogEmpty").style.display = "none";
+      for (const item of rows) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${levelBadge(item.level)}</td>
+          <td>${item.time || ""}</td>
+          <td title="${item.message || ""}">${item.message || ""}</td>
+        `;
+        body.appendChild(tr);
+      }
+    }
 
     async function loadSetting() {
       const result = await requestJSON("/api/v1/monitor");
@@ -99,20 +151,32 @@
       document.getElementById("smtpSsl").value = item.smtpSsl ? "true" : "false";
       document.getElementById("emailEnabled").value = item.isEnableEmailNotice ? "true" : "false";
       showJSON("box", result);
+      return result;
     }
 
-    bindAction("load", loadSetting, "box");
+    async function loadStatusLogs() {
+      const limit = Number(document.getElementById("statusLimit").value || 100);
+      const level = encodeURIComponent(document.getElementById("statusLevel").value || "");
+      const result = await requestJSON(`/api/v1/monitor/status?limit=${limit}&level=${level}`);
+      renderLogs((result.data || {}).items || []);
+      showJSON("box", result);
+      return result;
+    }
+
+    bindAction("load", loadSetting, "box", { successToast: false });
     bindAction("saveRoom", async () => {
       const payload = {
         isEnabled: document.getElementById("isEnabled").value === "true",
         roomId: Number(document.getElementById("roomId").value || 0),
         roomUrl: document.getElementById("roomUrl").value || ""
       };
-      showJSON("box", await requestJSON("/api/v1/monitor/room", {
+      const result = await requestJSON("/api/v1/monitor/room", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
-      }));
+      });
+      showJSON("box", result);
+      return result;
     }, "box");
     bindAction("saveEmail", async () => {
       const payload = {
@@ -125,11 +189,13 @@
         password: document.getElementById("password").value || "",
         receivers: document.getElementById("receivers").value || ""
       };
-      showJSON("box", await requestJSON("/api/v1/monitor/email", {
+      const result = await requestJSON("/api/v1/monitor/email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
-      }));
+      });
+      showJSON("box", result);
+      return result;
     }, "box");
     bindAction("testEmail", async () => {
       const rawReceivers = (document.getElementById("receivers").value || "")
@@ -141,19 +207,19 @@
         body: document.getElementById("testBody").value || "",
         receivers: rawReceivers
       };
-      showJSON("box", await requestJSON("/api/v1/monitor/email/test", {
+      const result = await requestJSON("/api/v1/monitor/email/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
-      }));
+      });
+      showJSON("box", result);
+      await loadStatusLogs();
+      return result;
     }, "box");
-    bindAction("status", async () => {
-      const limit = Number(document.getElementById("statusLimit").value || 100);
-      const level = encodeURIComponent(document.getElementById("statusLevel").value || "");
-      showJSON("box", await requestJSON(`/api/v1/monitor/status?limit=${limit}&level=${level}`));
-    }, "box");
+    bindAction("status", loadStatusLogs, "box", { successToast: false });
 
     loadSetting().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
+    loadStatusLogs().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
   </script>
 </body>
 </html>

@@ -15,9 +15,13 @@
       <h1>直播间设置</h1>
       <p class="soft-note">用于维护直播间基础信息：房间号、分区、标题和公告。</p>
       <div id="roleTip" class="role-tip"></div>
+
       <div class="grid two">
         <label>房间号<input id="roomId" type="number" /></label>
-        <label>分区ID<input id="areaId" type="number" /></label>
+        <label>分区（可搜索）
+          <input id="areaSearch" list="areaList" placeholder="输入关键词查找分区，例如 游戏 / 单机" />
+          <datalist id="areaList"></datalist>
+        </label>
       </div>
       <label>标题<input id="roomName" /></label>
       <label>公告<textarea id="content" rows="4"></textarea></label>
@@ -27,6 +31,7 @@
         <button id="saveRoom" data-perm="operator,admin">保存房间</button>
         <button id="saveAnnouncement" data-perm="operator,admin">保存公告</button>
       </div>
+      <div id="areaHint" class="soft-note"></div>
       <pre id="box">{}</pre>
     </section>
   </main>
@@ -36,30 +41,99 @@
     const { initPage, requestJSON, showJSON, bindAction } = window.GoverShared;
     initPage({ active: "room" });
 
+    const areaLabelToID = new Map();
+    const areaIDToLabel = new Map();
+
+    function flattenAreas(items, result) {
+      const rows = Array.isArray(items) ? items : [];
+      for (const item of rows) {
+        const id = Number(item.id || 0);
+        const parent = String(item.parent_name || item.parentName || "").trim();
+        const name = String(item.name || "").trim();
+        if (id > 0 && name) {
+          const label = parent ? `${parent} / ${name} (#${id})` : `${name} (#${id})`;
+          result.push({ id, label });
+        }
+        if (Array.isArray(item.list) && item.list.length > 0) {
+          flattenAreas(item.list, result);
+        }
+      }
+    }
+
+    function fillAreaOptions(items) {
+      areaLabelToID.clear();
+      areaIDToLabel.clear();
+      const all = [];
+      flattenAreas(items, all);
+      all.sort((a, b) => a.label.localeCompare(b.label, "zh-CN"));
+      const list = document.getElementById("areaList");
+      list.innerHTML = "";
+      for (const row of all) {
+        areaLabelToID.set(row.label, row.id);
+        areaIDToLabel.set(row.id, row.label);
+        const opt = document.createElement("option");
+        opt.value = row.label;
+        list.appendChild(opt);
+      }
+      document.getElementById("areaHint").textContent = all.length ? `已加载 ${all.length} 个分区，可直接输入关键词检索。` : "未加载到分区列表。";
+    }
+
+    function parseAreaID() {
+      const raw = String(document.getElementById("areaSearch").value || "").trim();
+      if (!raw) return 0;
+      if (areaLabelToID.has(raw)) {
+        return Number(areaLabelToID.get(raw) || 0);
+      }
+      const directNumber = Number(raw);
+      if (Number.isFinite(directNumber) && directNumber > 0) {
+        return directNumber;
+      }
+      const match = raw.match(/#(\d+)\)?$/);
+      if (match && match[1]) {
+        return Number(match[1]);
+      }
+      return 0;
+    }
+
     async function loadRoom() {
       const result = await requestJSON("/api/v1/room");
       const item = result.data || {};
       document.getElementById("roomId").value = item.roomId || "";
-      document.getElementById("areaId").value = item.areaId || "";
       document.getElementById("roomName").value = item.roomName || "";
       document.getElementById("content").value = item.content || "";
+      const areaID = Number(item.areaId || 0);
+      if (areaID > 0 && areaIDToLabel.has(areaID)) {
+        document.getElementById("areaSearch").value = areaIDToLabel.get(areaID) || String(areaID);
+      } else {
+        document.getElementById("areaSearch").value = areaID > 0 ? String(areaID) : "";
+      }
       showJSON("box", result);
+      return result;
     }
 
-    bindAction("load", loadRoom, "box");
-    bindAction("areas", async () => showJSON("box", await requestJSON("/api/v1/room/areas")), "box");
+    async function loadAreas() {
+      const result = await requestJSON("/api/v1/room/areas");
+      fillAreaOptions(result.data || []);
+      showJSON("box", result);
+      return result;
+    }
+
+    bindAction("load", loadRoom, "box", { successToast: false });
+    bindAction("areas", loadAreas, "box");
     bindAction("saveRoom", async () => {
       const payload = {
         roomId: Number(document.getElementById("roomId").value || 0),
-        areaId: Number(document.getElementById("areaId").value || 0),
+        areaId: parseAreaID(),
         roomName: document.getElementById("roomName").value || ""
       };
+      if (!payload.areaId) throw new Error("请选择有效分区（可先点击“读取分区”）");
       const result = await requestJSON("/api/v1/room/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
       showJSON("box", result);
+      return result;
     }, "box");
     bindAction("saveAnnouncement", async () => {
       const payload = {
@@ -72,8 +146,10 @@
         body: JSON.stringify(payload)
       });
       showJSON("box", result);
+      return result;
     }, "box");
 
+    loadAreas().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
     loadRoom().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
   </script>
 </body>
