@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/bluenviron/gortsplib/v5"
 	"github.com/bluenviron/gortsplib/v5/pkg/base"
+	"github.com/bluenviron/gortsplib/v5/pkg/description"
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
@@ -100,11 +102,13 @@ func (s *Service) StartRTSPPreview(ctx context.Context, sourceURL string, offerS
 		return nil, fmt.Errorf("rtsp describe failed: %w", err)
 	}
 
-	var h264Format *format.H264
-	media := desc.FindFormat(&h264Format)
-	if media == nil {
+	media, selectedFormat, codecSummary := findH264VideoFormat(desc)
+	if media == nil || selectedFormat == nil {
 		client.Close()
-		return nil, errors.New("rtsp source has no H264 video track; WebRTC preview currently supports H264 only")
+		if codecSummary == "" {
+			return nil, errors.New("rtsp source has no H264 video track; WebRTC preview currently supports H264 only")
+		}
+		return nil, fmt.Errorf("rtsp source has no H264 video track; detected codecs: %s; WebRTC preview currently supports H264 only", codecSummary)
 	}
 
 	if _, err := client.Setup(desc.BaseURL, media, 0, 0); err != nil {
@@ -157,7 +161,7 @@ func (s *Service) StartRTSPPreview(ctx context.Context, sourceURL string, offerS
 		payloadType = uint8(params.Codecs[0].PayloadType)
 	}
 
-	client.OnPacketRTP(media, h264Format, func(pkt *rtp.Packet) {
+	client.OnPacketRTP(media, selectedFormat, func(pkt *rtp.Packet) {
 		if pkt == nil {
 			return
 		}
@@ -343,4 +347,58 @@ func randomSessionID(bytesSize int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buffer), nil
+}
+
+func findH264VideoFormat(desc *description.Session) (*description.Media, format.Format, string) {
+	if desc == nil {
+		return nil, nil, ""
+	}
+	detected := make([]string, 0, 8)
+	for _, media := range desc.Medias {
+		if media == nil {
+			continue
+		}
+		for _, forma := range media.Formats {
+			if forma == nil {
+				continue
+			}
+			codec := normalizeCodecName(forma.Codec(), forma.RTPMap())
+			if codec != "" {
+				label := fmt.Sprintf("%s/%s", strings.ToLower(string(media.Type)), codec)
+				if !slices.Contains(detected, label) {
+					detected = append(detected, label)
+				}
+			}
+			if media.Type != description.MediaTypeVideo {
+				continue
+			}
+			if codec == "H264" {
+				return media, forma, joinCodecSummary(detected)
+			}
+		}
+	}
+	return nil, nil, joinCodecSummary(detected)
+}
+
+func normalizeCodecName(codec string, rtpMap string) string {
+	name := strings.ToUpper(strings.TrimSpace(codec))
+	if name != "" {
+		return name
+	}
+	rtp := strings.ToUpper(strings.TrimSpace(rtpMap))
+	if rtp == "" {
+		return ""
+	}
+	part := strings.SplitN(rtp, "/", 2)[0]
+	return strings.TrimSpace(part)
+}
+
+func joinCodecSummary(items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	sorted := make([]string, len(items))
+	copy(sorted, items)
+	sort.Strings(sorted)
+	return strings.Join(sorted, ", ")
 }
