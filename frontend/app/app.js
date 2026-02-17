@@ -239,6 +239,7 @@ async function refreshRuntimeConfig() {
   document.getElementById("cfgDBPath").value = cfg.dbPath || "";
   document.getElementById("cfgMediaDir").value = cfg.mediaDir || "";
   document.getElementById("cfgEnableDebugLogs").value = cfg.enableDebugLogs ? "true" : "false";
+  document.getElementById("cfgAutoStartPush").value = cfg.autoStartPush ? "true" : "false";
   document.getElementById("cfgFFmpegPath").value = cfg.ffmpegPath || "";
   document.getElementById("cfgFFprobePath").value = cfg.ffprobePath || "";
   document.getElementById("cfgBiliAppKey").value = cfg.biliAppKey || "";
@@ -259,6 +260,7 @@ function buildRuntimeConfigPayload() {
     dbPath: asString("cfgDBPath"),
     mediaDir: asString("cfgMediaDir"),
     enableDebugLogs: asString("cfgEnableDebugLogs") === "true",
+    autoStartPush: asString("cfgAutoStartPush") === "true",
     ffmpegPath: asString("cfgFFmpegPath"),
     ffprobePath: asString("cfgFFprobePath"),
     biliAppKey: asString("cfgBiliAppKey"),

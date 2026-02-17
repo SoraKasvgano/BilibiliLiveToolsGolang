@@ -129,6 +129,9 @@ func decodeConfigPatch(r *http.Request, base config.Config) (config.Config, erro
 	if value, ok := getBool(req, "enableDebugLogs"); ok {
 		base.EnableDebugLogs = value
 	}
+	if value, ok := getBool(req, "autoStartPush"); ok {
+		base.AutoStartPush = value
+	}
 	if value, ok := getBool(req, "debugMode"); ok {
 		base.DebugMode = value
 		base.EnableDebugLogs = value
@@ -215,6 +218,9 @@ func restartRequiredChangedFields(oldCfg config.Config, newCfg config.Config) []
 	if oldCfg.LogBufferSize != newCfg.LogBufferSize {
 		result = append(result, "logBufferSize")
 	}
+	if oldCfg.AutoStartPush != newCfg.AutoStartPush {
+		result = append(result, "autoStartPush")
+	}
 	if oldCfg.GB28181Enabled != newCfg.GB28181Enabled {
 		result = append(result, "gb28181Enabled")
 	}
@@ -246,6 +252,7 @@ func runtimeHotReloadNotes() []string {
 	return []string{
 		"Dynamic hot reload now applies to ffmpegPath/ffprobePath and Bilibili API credentials/metadata.",
 		"debugMode/enableDebugLogs now hot apply to data/log file logging and ffmpeg verbose mirror.",
+		"autoStartPush controls whether startup will auto-call push start; change takes effect on next process start.",
 		"GB28181 signaling and media port pool settings can be edited here; runtime service will apply on next start/restart.",
 		"All other fields are persisted, but restart is required before they fully apply.",
 	}

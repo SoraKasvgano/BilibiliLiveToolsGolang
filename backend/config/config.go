@@ -21,6 +21,7 @@ type Config struct {
 	AllowOrigin              string `json:"allowOrigin"`
 	DebugMode                bool   `json:"debugMode"`
 	EnableDebugLogs          bool   `json:"enableDebugLogs"`
+	AutoStartPush            bool   `json:"autoStartPush"`
 	BiliAppKey               string `json:"biliAppKey"`
 	BiliAppSecret            string `json:"biliAppSecret"`
 	BiliPlatform             string `json:"biliPlatform"`
@@ -217,6 +218,7 @@ func defaultConfig(configFile string) Config {
 		AllowOrigin:              envOrDefault("GOVER_ALLOW_ORIGIN", "*"),
 		DebugMode:                strings.EqualFold(envOrDefault("GOVER_DEBUG", "false"), "true"),
 		EnableDebugLogs:          strings.EqualFold(envOrDefault("GOVER_DEBUG", "false"), "true"),
+		AutoStartPush:            strings.EqualFold(envOrDefault("GOVER_AUTO_START_PUSH", "false"), "true"),
 		BiliAppKey:               envOrDefault("GOVER_BILI_APP_KEY", "aae92bc66f3edfab"),
 		BiliAppSecret:            envOrDefault("GOVER_BILI_APP_SECRET", "af125a0d5279fd576c1b4418a3e8276d"),
 		BiliPlatform:             envOrDefault("GOVER_BILI_PLATFORM", "pc_link"),

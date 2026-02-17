@@ -91,6 +91,7 @@ go run .
 - `debugMode`（推荐）或 `enableDebugLogs` 设为 `true` 时，
   会将详细运行日志写入 `data/log/gover-YYYYMMDD.log`（含 ffmpeg 关键日志）。
 - 两个字段会自动同步，支持热加载，无需重启。
+- `autoStartPush` default is `false` (recommended). Set it to `true` if you want startup to auto-attempt push start.
 
 默认配置路径：
 

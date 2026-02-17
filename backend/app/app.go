@@ -259,11 +259,16 @@ func (a *App) serveFrontend(w http.ResponseWriter, r *http.Request, cleanPath st
 
 func (a *App) Run() error {
 	a.cfgManager.StartWatching()
-	go func() {
-		if err := a.stream.Start(context.Background(), true); err != nil {
-			log.Printf("startup stream skipped: %v", err)
-		}
-	}()
+	startupCfg := a.cfgManager.Current()
+	if startupCfg.AutoStartPush {
+		go func() {
+			if err := a.stream.Start(context.Background(), true); err != nil {
+				log.Printf("startup stream skipped: %v", err)
+			}
+		}()
+	} else {
+		log.Printf("startup auto push disabled by config (autoStartPush=false)")
+	}
 	a.telemetry.Start()
 	a.integration.Start()
 	a.maintenance.Start()

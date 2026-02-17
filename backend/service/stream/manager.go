@@ -402,6 +402,10 @@ func (m *Manager) recentFailureSummary() string {
 			// This HEVC warning can be transient (usually first GOP) and doesn't necessarily break streaming.
 			continue
 		}
+		if strings.Contains(lower, "fontconfig error: cannot load default config file") {
+			// drawtext still works with fallback font on Windows; this warning is noisy but usually harmless.
+			continue
+		}
 		matched := false
 		for _, keyword := range keywords {
 			if strings.Contains(lower, keyword) {
@@ -471,6 +475,7 @@ func classifyFFmpegLogLevel(defaultLevel string, message string) string {
 	infoPrefixes := []string{
 		"input #", "output #", "metadata:", "duration:", "stream #",
 		"stream mapping:", "press [q] to stop", "side data:",
+		"title           :", "encoder         :", "cpb:",
 	}
 	for _, prefix := range infoPrefixes {
 		if strings.HasPrefix(lower, prefix) {
@@ -480,7 +485,27 @@ func classifyFFmpegLogLevel(defaultLevel string, message string) string {
 	if strings.HasPrefix(lower, "frame=") {
 		return "Info"
 	}
+	if strings.Contains(lower, " -> stream #") {
+		return "Info"
+	}
+	if strings.HasPrefix(lower, "[parsed_drawtext_") && strings.Contains(lower, "using \"") {
+		return "Info"
+	}
+	if strings.HasPrefix(lower, "[libx264") {
+		if strings.Contains(lower, "using sar=") ||
+			strings.Contains(lower, "using cpu capabilities") ||
+			strings.Contains(lower, "profile ") ||
+			strings.Contains(lower, "264 - core ") {
+			return "Info"
+		}
+	}
 	if isFFmpegBannerLine(lower) {
+		return "Info"
+	}
+	if strings.Contains(lower, "fontconfig error: cannot load default config file") {
+		return "Warn"
+	}
+	if strings.Contains(lower, "using \"c:/windows/fonts") {
 		return "Info"
 	}
 
