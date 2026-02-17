@@ -313,6 +313,16 @@ button:disabled {
   display: none;
 }
 
+.preview-panel video {
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid #d6e0f2;
+  background: #0f172a;
+  display: none;
+}
+
 .mosaic-list {
   margin-top: 10px;
   display: grid;

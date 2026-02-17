@@ -66,7 +66,7 @@ func BuildPreviewCommand(ctx BuildContext, options PreviewOptions) (string, []st
 			if streamURL == "" {
 				return "", nil, errors.New("rtsp url is required")
 			}
-			args = append(args, "-rtsp_transport", "tcp", "-i", streamURL)
+			args = appendRTSPInputArgs(args, streamURL)
 		case store.InputTypeMJPEG:
 			streamURL := strings.TrimSpace(ctx.Setting.MJPEGURL)
 			if streamURL == "" {
@@ -87,7 +87,7 @@ func BuildPreviewCommand(ctx BuildContext, options PreviewOptions) (string, []st
 			if isSDPSource(streamURL) {
 				args = append(args, "-protocol_whitelist", "file,udp,rtp,tcp", "-fflags", "+genpts", "-i", streamURL)
 			} else if isRTSPSource(streamURL) {
-				args = append(args, "-rtsp_transport", "tcp", "-i", streamURL)
+				args = appendRTSPInputArgs(args, streamURL)
 			} else if looksLikeMJPEG(streamURL) {
 				args = append(args, "-f", "mjpeg", "-i", streamURL)
 			} else {
@@ -98,7 +98,7 @@ func BuildPreviewCommand(ctx BuildContext, options PreviewOptions) (string, []st
 			if streamURL == "" {
 				return "", nil, errors.New("onvif preview currently expects a resolved rtsp url")
 			}
-			args = append(args, "-rtsp_transport", "tcp", "-i", streamURL)
+			args = appendRTSPInputArgs(args, streamURL)
 		default:
 			return "", nil, fmt.Errorf("unsupported input type: %s", ctx.Setting.InputType)
 		}
@@ -133,7 +133,7 @@ func appendMosaicPreviewInputArgs(ctx BuildContext, args *[]string) error {
 	}
 	for _, source := range sources {
 		if isRTSPSource(source.URL) {
-			*args = append(*args, "-rtsp_transport", "tcp", "-i", source.URL)
+			*args = appendRTSPInputArgs(*args, source.URL)
 			continue
 		}
 		if looksLikeMJPEG(source.URL) {

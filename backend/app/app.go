@@ -28,24 +28,26 @@ import (
 	"bilibililivetools/gover/backend/service/onvif"
 	"bilibililivetools/gover/backend/service/stream"
 	"bilibililivetools/gover/backend/service/telemetry"
+	previewsvc "bilibililivetools/gover/backend/service/webrtcpreview"
 	"bilibililivetools/gover/backend/store"
 )
 
 type App struct {
-	cfg         config.Config
-	cfgManager  *config.Manager
-	store       *store.Store
-	stream      *stream.Manager
-	server      *http.Server
-	telemetry   *telemetry.Service
-	integration *integration.Service
-	maintenance *maintenance.Service
-	gb28181     *gbsvc.Service
-	frontendFS  fs.FS
-	apiHandler  http.Handler
-	routes      []router.Route
-	openapiJSON []byte
-	logger      *logging.Manager
+	cfg           config.Config
+	cfgManager    *config.Manager
+	store         *store.Store
+	stream        *stream.Manager
+	server        *http.Server
+	telemetry     *telemetry.Service
+	integration   *integration.Service
+	maintenance   *maintenance.Service
+	gb28181       *gbsvc.Service
+	webrtcPreview *previewsvc.Service
+	frontendFS    fs.FS
+	apiHandler    http.Handler
+	routes        []router.Route
+	openapiJSON   []byte
+	logger        *logging.Manager
 }
 
 func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
@@ -71,6 +73,7 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 	streamMgr := stream.NewManager(storeDB, ffmpegSvc, bilibiliSvc, cfg.MediaDir, cfg.LogBufferSize, cfg.EnableDebugLogs || cfg.DebugMode)
 	telemetrySvc := telemetry.New(storeDB, bilibiliSvc, streamMgr.Status)
 	integrationSvc := integration.New(storeDB, streamMgr, bilibiliSvc, onvifSvc)
+	webrtcPreviewSvc := previewsvc.New(24, cfg.EnableDebugLogs || cfg.DebugMode)
 	loggerMgr, err := logging.New(cfg)
 	if err != nil {
 		storeDB.Close()
@@ -78,19 +81,20 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 	}
 
 	deps := &router.Dependencies{
-		Config:      cfg,
-		ConfigMgr:   cfgManager,
-		Store:       storeDB,
-		Auth:        authService,
-		FFmpeg:      ffmpegSvc,
-		Stream:      streamMgr,
-		GB28181:     gbSvc,
-		Bilibili:    bilibiliSvc,
-		Integration: integrationSvc,
-		Maintenance: maintenanceSvc,
-		Monitor:     monitorSvc,
-		ONVIF:       onvifSvc,
-		FrontendFS:  embeddedFrontend,
+		Config:        cfg,
+		ConfigMgr:     cfgManager,
+		Store:         storeDB,
+		Auth:          authService,
+		FFmpeg:        ffmpegSvc,
+		Stream:        streamMgr,
+		GB28181:       gbSvc,
+		Bilibili:      bilibiliSvc,
+		Integration:   integrationSvc,
+		Maintenance:   maintenanceSvc,
+		Monitor:       monitorSvc,
+		ONVIF:         onvifSvc,
+		WebRTCPreview: webrtcPreviewSvc,
+		FrontendFS:    embeddedFrontend,
 	}
 	apiHandler, routes := router.Build(deps)
 	openapi, err := buildOpenAPISpec(routes)
@@ -108,19 +112,20 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 	}
 
 	app := &App{
-		cfg:         cfg,
-		cfgManager:  cfgManager,
-		store:       storeDB,
-		stream:      streamMgr,
-		telemetry:   telemetrySvc,
-		integration: integrationSvc,
-		maintenance: maintenanceSvc,
-		gb28181:     gbSvc,
-		frontendFS:  frontendSub,
-		apiHandler:  apiHandler,
-		routes:      routes,
-		openapiJSON: openapi,
-		logger:      loggerMgr,
+		cfg:           cfg,
+		cfgManager:    cfgManager,
+		store:         storeDB,
+		stream:        streamMgr,
+		telemetry:     telemetrySvc,
+		integration:   integrationSvc,
+		maintenance:   maintenanceSvc,
+		gb28181:       gbSvc,
+		webrtcPreview: webrtcPreviewSvc,
+		frontendFS:    frontendSub,
+		apiHandler:    apiHandler,
+		routes:        routes,
+		openapiJSON:   openapi,
+		logger:        loggerMgr,
 	}
 	cfgManager.AddListener(func(newCfg config.Config) {
 		log.Printf("[config] hot reload applied from %s", newCfg.ConfigFile)
@@ -128,6 +133,7 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 		bilibiliSvc.UpdateConfig(newCfg)
 		gbSvc.UpdateConfig(newCfg)
 		streamMgr.UpdateDebug(newCfg.EnableDebugLogs || newCfg.DebugMode)
+		webrtcPreviewSvc.UpdateDebug(newCfg.EnableDebugLogs || newCfg.DebugMode)
 		if err := loggerMgr.Update(newCfg); err != nil {
 			log.Printf("[config][warn] update logger failed: %v", err)
 		}
@@ -275,6 +281,9 @@ func (a *App) Shutdown(ctx context.Context) error {
 	a.telemetry.Stop()
 	if a.gb28181 != nil {
 		_ = a.gb28181.Stop(ctx)
+	}
+	if a.webrtcPreview != nil {
+		a.webrtcPreview.CloseAll()
 	}
 	_ = a.stream.Stop(ctx)
 	shutdownErr := a.server.Shutdown(ctx)

@@ -196,13 +196,20 @@ func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 		if strings.TrimSpace(ctx.Setting.RTSPURL) == "" {
 			return "", nil, errors.New("rtsp url is required")
 		}
-		args = append(args, "-rtsp_transport", "tcp", "-i", strings.TrimSpace(ctx.Setting.RTSPURL))
+		// RTSP cameras vary a lot; force transcode + conservative probe settings for stability.
+		forceVideoTranscode = true
+		args = appendRTSPInputArgs(args, strings.TrimSpace(ctx.Setting.RTSPURL))
 		if ctx.AudioMaterial != nil {
 			audioPath := filepath.Join(ctx.MediaDir, filepath.FromSlash(ctx.AudioMaterial.Path))
-			args = append(args, "-stream_loop", "-1", "-i", audioPath, "-map", "0:v:0", "-map", "1:a:0")
+			args = append(args, "-stream_loop", "-1", "-i", audioPath)
+			args = append(args, "-map", "0:v:0", "-map", "1:a:0")
 			hasAudio = true
-		} else if !ctx.Setting.IsMute {
-			hasAudio = true
+		} else {
+			args = append(args, "-map", "0:v:0")
+			if !ctx.Setting.IsMute {
+				args = append(args, "-map", "0:a:0?")
+				hasAudio = true
+			}
 		}
 
 	case store.InputTypeMJPEG:
@@ -239,7 +246,7 @@ func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 			forceVideoTranscode = true
 			args = append(args, "-protocol_whitelist", "file,udp,rtp,tcp", "-fflags", "+genpts", "-i", gbURL)
 		} else if isRTSPSource(gbURL) {
-			args = append(args, "-rtsp_transport", "tcp", "-i", gbURL)
+			args = appendRTSPInputArgs(args, gbURL)
 		} else if looksLikeMJPEG(gbURL) {
 			forceVideoTranscode = true
 			args = append(args, "-f", "mjpeg", "-i", gbURL)
@@ -258,8 +265,12 @@ func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 		if strings.TrimSpace(ctx.Setting.RTSPURL) == "" {
 			return "", nil, errors.New("onvif input currently expects a resolved rtsp url")
 		}
-		args = append(args, "-rtsp_transport", "tcp", "-i", strings.TrimSpace(ctx.Setting.RTSPURL))
+		// ONVIF preview/push source is RTSP under the hood; apply same robust RTSP defaults.
+		forceVideoTranscode = true
+		args = appendRTSPInputArgs(args, strings.TrimSpace(ctx.Setting.RTSPURL))
+		args = append(args, "-map", "0:v:0")
 		if !ctx.Setting.IsMute {
+			args = append(args, "-map", "0:a:0?")
 			hasAudio = true
 		}
 
@@ -357,7 +368,7 @@ func appendMosaicInputArgs(ctx BuildContext, args *[]string, hasAudio *bool) err
 
 	for _, source := range sources {
 		if isRTSPSource(source.URL) {
-			*args = append(*args, "-rtsp_transport", "tcp", "-i", source.URL)
+			*args = appendRTSPInputArgs(*args, source.URL)
 			continue
 		}
 		if looksLikeMJPEG(source.URL) {
@@ -789,4 +800,23 @@ func looksLikeMJPEG(sourceURL string) bool {
 		return strings.Contains(lower, "mjpeg") || strings.Contains(lower, "mjpg")
 	}
 	return false
+}
+
+func appendRTSPInputArgs(args []string, sourceURL string) []string {
+	sourceURL = strings.TrimSpace(sourceURL)
+	if sourceURL == "" {
+		return args
+	}
+	// Keep RTSP pull conservative while allowing non-standard devices to negotiate UDP fallback.
+	args = append(args,
+		"-rtsp_flags", "prefer_tcp",
+		"-rw_timeout", "60000000",
+		"-thread_queue_size", "1024",
+		"-analyzeduration", "10000000",
+		"-probesize", "5000000",
+		"-fflags", "+genpts+discardcorrupt",
+		"-use_wallclock_as_timestamps", "1",
+		"-i", sourceURL,
+	)
+	return args
 }

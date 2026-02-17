@@ -21,23 +21,25 @@ import (
 	"bilibililivetools/gover/backend/service/monitor"
 	"bilibililivetools/gover/backend/service/onvif"
 	"bilibililivetools/gover/backend/service/stream"
+	previewsvc "bilibililivetools/gover/backend/service/webrtcpreview"
 	"bilibililivetools/gover/backend/store"
 )
 
 type Dependencies struct {
-	Config      config.Config
-	ConfigMgr   *config.Manager
-	Store       *store.Store
-	Auth        *authsvc.Service
-	FFmpeg      *ffsvc.Service
-	Stream      *stream.Manager
-	GB28181     *gbsvc.Service
-	Bilibili    bilibili.Service
-	Integration *integration.Service
-	Maintenance *maintenance.Service
-	Monitor     *monitor.Service
-	ONVIF       *onvif.Service
-	FrontendFS  fs.FS
+	Config        config.Config
+	ConfigMgr     *config.Manager
+	Store         *store.Store
+	Auth          *authsvc.Service
+	FFmpeg        *ffsvc.Service
+	Stream        *stream.Manager
+	GB28181       *gbsvc.Service
+	Bilibili      bilibili.Service
+	Integration   *integration.Service
+	Maintenance   *maintenance.Service
+	Monitor       *monitor.Service
+	ONVIF         *onvif.Service
+	WebRTCPreview *previewsvc.Service
+	FrontendFS    fs.FS
 }
 
 type Route struct {

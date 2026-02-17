@@ -201,12 +201,25 @@
             <input id="cameraPreviewFps" type="number" value="8" min="1" max="20" />
           </label>
         </div>
+        <div class="grid two">
+          <label>Preview protocol
+            <select id="cameraPreviewMode">
+              <option value="auto" selected>Auto (RTSP/ONVIF prefer WebRTC)</option>
+              <option value="webrtc">WebRTC</option>
+              <option value="mjpeg">MJPEG</option>
+            </select>
+          </label>
+          <label>Note
+            <input value="For RTSP/ONVIF, WebRTC is usually smoother and lower latency." readonly />
+          </label>
+        </div>
         <div class="actions">
           <button id="btnCameraPreviewStart">开启预览</button>
           <button id="btnCameraPreviewStop">关闭预览</button>
         </div>
         <div class="preview-panel">
           <img id="cameraPreviewImage" alt="摄像头预览画面" />
+          <video id="cameraPreviewVideo" autoplay muted playsinline controls></video>
           <div id="cameraPreviewInfo" class="soft-note">请先从下方列表选择已保存的摄像头，再开启预览。</div>
         </div>
       </div>
@@ -269,6 +282,8 @@
 
     const rowsCache = new Map();
     let cameraPreviewRunning = false;
+    let cameraPreviewPeer = null;
+    let cameraPreviewSessionId = "";
     let editingCameraId = 0;
     let flashCameraId = 0;
     let onvifAutoProbeTimer = null;
@@ -481,22 +496,84 @@
       document.getElementById("cameraPreviewInfo").textContent = text || "";
     }
 
+    function isRTSPLike(value) {
+      const text = String(value || "").trim().toLowerCase();
+      return text.startsWith("rtsp://") || text.startsWith("rtsps://");
+    }
+
+    function shouldUseCameraWebRTC(item) {
+      const mode = textValue("cameraPreviewMode") || "auto";
+      if (mode === "webrtc") return true;
+      if (mode === "mjpeg") return false;
+      const sourceType = sourceTypeOf(item) || textValue("cameraType");
+      if (sourceType === "rtsp" || sourceType === "onvif") return true;
+      if (sourceType === "gb28181") {
+        const gbPullURL = String((item && item.gbPullUrl) || textValue("cameraGbPullUrl") || "").trim();
+        return isRTSPLike(gbPullURL);
+      }
+      return false;
+    }
+
+    function waitForICEGatheringComplete(peer) {
+      if (!peer || peer.iceGatheringState === "complete") {
+        return Promise.resolve();
+      }
+      return new Promise((resolve) => {
+        const onState = () => {
+          if (peer.iceGatheringState === "complete") {
+            peer.removeEventListener("icegatheringstatechange", onState);
+            resolve();
+          }
+        };
+        peer.addEventListener("icegatheringstatechange", onState);
+      });
+    }
+
+    function stopCameraPreviewPeer() {
+      if (cameraPreviewPeer) {
+        try {
+          cameraPreviewPeer.ontrack = null;
+          cameraPreviewPeer.onconnectionstatechange = null;
+          cameraPreviewPeer.close();
+        } catch (_) {
+          // Ignore close errors.
+        }
+      }
+      cameraPreviewPeer = null;
+      if (cameraPreviewSessionId) {
+        requestJSON("/api/v1/push/preview/webrtc/close", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: cameraPreviewSessionId }),
+        }).catch(() => {});
+      }
+      cameraPreviewSessionId = "";
+    }
+
     function stopCameraPreview() {
       const img = document.getElementById("cameraPreviewImage");
-      if (!img) return;
+      const video = document.getElementById("cameraPreviewVideo");
+      if (!img || !video) return;
       cameraPreviewRunning = false;
+      stopCameraPreviewPeer();
       img.style.display = "none";
       img.src = "";
+      video.pause();
+      video.style.display = "none";
+      video.srcObject = null;
       setPreviewInfo("预览已关闭。");
     }
 
-    function startCameraPreview() {
-      const id = numberValue("cameraId", 0);
-      if (!id) throw new Error("请先在列表选择一个已保存摄像头，再开启预览");
+    function startCameraPreviewMJPEG(id) {
       const width = Math.max(240, Math.min(1920, numberValue("cameraPreviewWidth", 640)));
       const fps = Math.max(1, Math.min(20, numberValue("cameraPreviewFps", 8)));
       const img = document.getElementById("cameraPreviewImage");
+      const video = document.getElementById("cameraPreviewVideo");
+      stopCameraPreviewPeer();
       cameraPreviewRunning = true;
+      video.pause();
+      video.style.display = "none";
+      video.srcObject = null;
       img.style.display = "block";
       img.onerror = () => {
         if (!cameraPreviewRunning) return;
@@ -508,6 +585,92 @@
       };
       img.src = `/api/v1/cameras/${id}/preview/mjpeg?width=${width}&fps=${fps}&_ts=${Date.now()}`;
       setPreviewInfo("正在建立预览连接...");
+    }
+
+    async function startCameraPreviewWebRTC(id) {
+      const img = document.getElementById("cameraPreviewImage");
+      const video = document.getElementById("cameraPreviewVideo");
+      stopCameraPreviewPeer();
+      img.style.display = "none";
+      img.src = "";
+
+      const peer = new RTCPeerConnection({ iceServers: [] });
+      try {
+        cameraPreviewPeer = peer;
+        const stream = new MediaStream();
+        video.srcObject = stream;
+        video.style.display = "block";
+        cameraPreviewRunning = true;
+        setPreviewInfo("正在建立 WebRTC 预览连接...");
+
+        peer.ontrack = (event) => {
+          const tracks = event.streams && event.streams[0] ? event.streams[0].getTracks() : [event.track];
+          for (const track of tracks) {
+            if (stream.getTracks().find((item) => item.id === track.id)) continue;
+            stream.addTrack(track);
+          }
+        };
+
+        peer.onconnectionstatechange = () => {
+          if (!cameraPreviewRunning) return;
+          const state = peer.connectionState;
+          if (state === "connected") {
+            setPreviewInfo("WebRTC 预览已连接。");
+          } else if (state === "failed" || state === "disconnected" || state === "closed") {
+            setPreviewInfo(`WebRTC 连接状态：${state}`);
+          }
+        };
+
+        const offer = await peer.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: true });
+        await peer.setLocalDescription(offer);
+        await waitForICEGatheringComplete(peer);
+        const local = peer.localDescription;
+        if (!local || !local.sdp) {
+          throw new Error("WebRTC 本地 offer 为空");
+        }
+
+        const result = await requestJSON(`/api/v1/cameras/${id}/preview/webrtc/offer`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: local.type || "offer", sdp: local.sdp }),
+        });
+        const answer = result && result.data ? result.data : {};
+        if (!answer.sdp) {
+          throw new Error("WebRTC answer 为空");
+        }
+        await peer.setRemoteDescription({
+          type: answer.type || "answer",
+          sdp: answer.sdp,
+        });
+        cameraPreviewSessionId = String(answer.sessionId || "").trim();
+        try {
+          await video.play();
+        } catch (_) {
+          // Browser autoplay policies may block auto play.
+        }
+      } catch (error) {
+        stopCameraPreview();
+        throw error;
+      }
+    }
+
+    async function startCameraPreview() {
+      const id = numberValue("cameraId", 0);
+      if (!id) throw new Error("请先在列表选择一个已保存摄像头，再开启预览");
+      const selected = rowsCache.get(id) || null;
+      const mode = textValue("cameraPreviewMode") || "auto";
+      if (shouldUseCameraWebRTC(selected)) {
+        try {
+          await startCameraPreviewWebRTC(id);
+          return;
+        } catch (error) {
+          if (mode === "webrtc") {
+            throw error;
+          }
+          showToast(`WebRTC 预览失败，自动回退 MJPEG：${error.message || String(error)}`, "info");
+        }
+      }
+      startCameraPreviewMJPEG(id);
     }
 
     async function loadList() {
@@ -753,13 +916,17 @@
       showJSON("cameraBox", { code: 0, message: "已重置表单，可新建摄像头", data: {} });
     }, "cameraBox");
     bindAction("btnCameraPreviewStart", async () => {
-      startCameraPreview();
+      await startCameraPreview();
       showJSON("cameraBox", { code: 0, message: "已开启预览" });
     }, "cameraBox");
     bindAction("btnCameraPreviewStop", async () => {
       stopCameraPreview();
       showJSON("cameraBox", { code: 0, message: "已关闭预览" });
     }, "cameraBox");
+
+    window.addEventListener("beforeunload", () => {
+      stopCameraPreviewPeer();
+    });
 
     resetForm("rtsp");
     loadList().catch((error) => showJSON("cameraBox", { code: -1, message: error.message || String(error) }));

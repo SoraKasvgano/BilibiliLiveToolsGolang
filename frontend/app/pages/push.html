@@ -167,12 +167,25 @@
             <input id="previewFps" type="number" value="10" min="1" max="20" />
           </label>
         </div>
+        <div class="grid two">
+          <label>Preview protocol
+            <select id="previewMode">
+              <option value="auto" selected>Auto (RTSP/ONVIF prefer WebRTC)</option>
+              <option value="webrtc">WebRTC</option>
+              <option value="mjpeg">MJPEG</option>
+            </select>
+          </label>
+          <label>Note
+            <input value="WebRTC is low-latency and usually lower bandwidth than MJPEG." readonly />
+          </label>
+        </div>
         <div class="actions">
           <button id="btnStartLocalPreview">开启本地预览</button>
           <button id="btnStopLocalPreview">关闭本地预览</button>
         </div>
         <div class="preview-panel">
           <img id="localPreviewImage" alt="推流本地预览画面" />
+          <video id="localPreviewVideo" autoplay muted playsinline controls></video>
           <div id="localPreviewInfo" class="soft-note">本地预览默认关闭，点击“开启本地预览”后按当前配置拉流并显示。</div>
         </div>
       </div>
@@ -258,6 +271,8 @@
 
     const cameraMap = new Map();
     let localPreviewRunning = false;
+    let localPreviewPeer = null;
+    let localPreviewSessionId = "";
     let multiInputSources = [];
 
     function asText(id) {
@@ -342,15 +357,144 @@
       document.getElementById("localPreviewInfo").textContent = text || "";
     }
 
+    function stopLocalPreviewPeer() {
+      if (localPreviewPeer) {
+        try {
+          localPreviewPeer.ontrack = null;
+          localPreviewPeer.onconnectionstatechange = null;
+          localPreviewPeer.close();
+        } catch (_) {
+          // Ignore close errors.
+        }
+      }
+      localPreviewPeer = null;
+      if (localPreviewSessionId) {
+        requestJSON("/api/v1/push/preview/webrtc/close", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: localPreviewSessionId }),
+        }).catch(() => {});
+      }
+      localPreviewSessionId = "";
+    }
+
     function stopLocalPreview() {
       const img = document.getElementById("localPreviewImage");
+      const video = document.getElementById("localPreviewVideo");
       localPreviewRunning = false;
+      stopLocalPreviewPeer();
       img.style.display = "none";
       img.src = "";
-      setLocalPreviewInfo("本地预览已关闭。");
+      video.pause();
+      video.style.display = "none";
+      video.srcObject = null;
+      setLocalPreviewInfo("Local preview stopped.");
+    }
+
+    function waitForICEGatheringComplete(peer) {
+      if (!peer || peer.iceGatheringState === "complete") {
+        return Promise.resolve();
+      }
+      return new Promise((resolve) => {
+        const onState = () => {
+          if (peer.iceGatheringState === "complete") {
+            peer.removeEventListener("icegatheringstatechange", onState);
+            resolve();
+          }
+        };
+        peer.addEventListener("icegatheringstatechange", onState);
+      });
+    }
+
+    function shouldUseWebRTCPreview() {
+      const mode = asText("previewMode") || "auto";
+      if (mode === "webrtc") return true;
+      if (mode === "mjpeg") return false;
+      const inputType = asText("inputType");
+      if (inputType === "rtsp" || inputType === "onvif") return true;
+      if (inputType === "gb28181") {
+        const gb = asText("gbPullUrl").toLowerCase();
+        return gb.startsWith("rtsp://") || gb.startsWith("rtsps://");
+      }
+      if (asBool("multiInputEnabled")) {
+        return multiInputSources.some((item) => {
+          const value = String((item && item.url) || "").trim().toLowerCase();
+          return value.startsWith("rtsp://") || value.startsWith("rtsps://");
+        });
+      }
+      return false;
+    }
+
+    async function startLocalPreviewWebRTC() {
+      stopLocalPreviewPeer();
+      const video = document.getElementById("localPreviewVideo");
+      const img = document.getElementById("localPreviewImage");
+      img.style.display = "none";
+      img.src = "";
+
+      const peer = new RTCPeerConnection({ iceServers: [] });
+      try {
+        localPreviewPeer = peer;
+        const stream = new MediaStream();
+        video.srcObject = stream;
+        video.style.display = "block";
+        localPreviewRunning = true;
+        setLocalPreviewInfo("WebRTC preview connecting...");
+
+        peer.ontrack = (event) => {
+          const tracks = event.streams && event.streams[0] ? event.streams[0].getTracks() : [event.track];
+          for (const track of tracks) {
+            if (stream.getTracks().find((item) => item.id === track.id)) continue;
+            stream.addTrack(track);
+          }
+        };
+
+        peer.onconnectionstatechange = () => {
+          if (!localPreviewRunning) return;
+          const state = peer.connectionState;
+          if (state === "connected") {
+            setLocalPreviewInfo("WebRTC preview connected.");
+          } else if (state === "failed" || state === "disconnected" || state === "closed") {
+            setLocalPreviewInfo(`WebRTC preview connection: ${state}`);
+          }
+        };
+
+        const offer = await peer.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: true });
+        await peer.setLocalDescription(offer);
+        await waitForICEGatheringComplete(peer);
+
+        const local = peer.localDescription;
+        if (!local || !local.sdp) {
+          throw new Error("WebRTC local offer is empty");
+        }
+        const result = await requestJSON("/api/v1/push/preview/webrtc/offer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: local.type || "offer", sdp: local.sdp }),
+        });
+        const answer = result && result.data ? result.data : {};
+        if (!answer.sdp) {
+          throw new Error("WebRTC answer is empty");
+        }
+        await peer.setRemoteDescription({
+          type: answer.type || "answer",
+          sdp: answer.sdp,
+        });
+        localPreviewSessionId = String(answer.sessionId || "").trim();
+        try {
+          await video.play();
+        } catch (_) {
+          // Browser autoplay policy may block; keep controls visible for manual play.
+        }
+        setLocalPreviewInfo("WebRTC preview started.");
+      } catch (error) {
+        stopLocalPreview();
+        throw error;
+      }
     }
 
     function switchInputPanels() {
+
       const inputType = asText("inputType");
       setPanelVisible("panelRTSP", inputType === "rtsp");
       setPanelVisible("panelMJPEG", inputType === "mjpeg");
@@ -369,7 +513,7 @@
       const type = String(inputType || "").toLowerCase();
       const commonOut = "-vcodec libx264 -pix_fmt yuv420p -r 25 -g 50 -b:v 3500k -maxrate 3500k -bufsize 7000k -preset veryfast -tune zerolatency -f flv {URL}";
       if (type === "rtsp" || type === "onvif") {
-        return `ffmpeg -rtsp_transport tcp -i \"${type === "onvif" ? "rtsp://user:pass@ip/stream" : "rtsp://user:pass@ip/stream"}\" -an ${commonOut}`;
+        return `ffmpeg -rtsp_flags prefer_tcp -rw_timeout 60000000 -i \"${type === "onvif" ? "rtsp://user:pass@ip/stream" : "rtsp://user:pass@ip/stream"}\" -an ${commonOut}`;
       }
       if (type === "mjpeg") {
         return "ffmpeg -f mjpeg -i \"http://ip:port/mjpeg\" -an " + commonOut;
@@ -1032,23 +1176,42 @@
       });
       showJSON("box", saveResult);
       if (saveResult && Number(saveResult.code) < 0) {
-        throw new Error(saveResult.message || "保存推流配置失败，无法开启本地预览");
+        throw new Error(saveResult.message || "save push setting failed, preview not started");
       }
+
+      const previewMode = asText("previewMode") || "auto";
+      if (shouldUseWebRTCPreview()) {
+        try {
+          await startLocalPreviewWebRTC();
+          return;
+        } catch (error) {
+          if (previewMode === "webrtc") {
+            throw error;
+          }
+          showToast(`WebRTC preview failed, fallback to MJPEG: ${error.message || String(error)}`, "info");
+        }
+      }
+
       const width = Math.max(240, Math.min(1920, asNumber("previewWidth", 960)));
       const fps = Math.max(1, Math.min(20, asNumber("previewFps", 10)));
       const img = document.getElementById("localPreviewImage");
+      const video = document.getElementById("localPreviewVideo");
       localPreviewRunning = true;
+      stopLocalPreviewPeer();
+      video.pause();
+      video.style.display = "none";
+      video.srcObject = null;
       img.style.display = "block";
       img.onerror = () => {
         if (!localPreviewRunning) return;
-        setLocalPreviewInfo("本地预览连接失败，请检查输入源信息后重试。");
+        setLocalPreviewInfo("Local MJPEG preview failed. Please re-check source settings.");
       };
       img.onload = () => {
         if (!localPreviewRunning) return;
-        setLocalPreviewInfo("本地预览进行中（低帧率用于调试，降低资源占用）");
+        setLocalPreviewInfo("Local MJPEG preview running.");
       };
       img.src = `/api/v1/push/preview/mjpeg?width=${width}&fps=${fps}&_ts=${Date.now()}`;
-      setLocalPreviewInfo("正在建立本地预览连接...");
+      setLocalPreviewInfo("Connecting MJPEG preview...");
     }
 
     async function refreshPushStatus(quiet) {
@@ -1150,6 +1313,10 @@
       window.open("/app/index.html", "_blank", "noopener");
       return { code: 0, message: "已打开高级控制台" };
     }, "box");
+
+    window.addEventListener("beforeunload", () => {
+      stopLocalPreviewPeer();
+    });
 
     switchInputPanels();
     applyBitratePresetFromValue(0);

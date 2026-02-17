@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"bilibililivetools/gover/backend/httpapi"
@@ -35,6 +37,8 @@ func (m *pushModule) Routes() []router.Route {
 		{Method: http.MethodPost, Pattern: "/restart", Summary: "Restart push stream", Handler: m.restart},
 		{Method: http.MethodGet, Pattern: "/status", Summary: "Get push status", Handler: m.status},
 		{Method: http.MethodGet, Pattern: "/preview/mjpeg", Summary: "Preview current push source as MJPEG stream", Handler: m.preview},
+		{Method: http.MethodPost, Pattern: "/preview/webrtc/offer", Summary: "Preview current push source via WebRTC (RTSP/H264)", Handler: m.previewWebRTCOffer},
+		{Method: http.MethodPost, Pattern: "/preview/webrtc/close", Summary: "Close WebRTC preview session", Handler: m.previewWebRTCClose},
 		{Method: http.MethodGet, Pattern: "/devices", Summary: "List available ffmpeg devices", Handler: m.devices},
 		{Method: http.MethodGet, Pattern: "/codecs", Summary: "List available codecs", Handler: m.codecs},
 		{Method: http.MethodGet, Pattern: "/version", Summary: "Get ffmpeg version", Handler: m.version},
@@ -130,6 +134,116 @@ func (m *pushModule) preview(w http.ResponseWriter, r *http.Request) {
 	if err := streamPreviewCommand(w, r, command, args, previewDebugEnabled(m.deps)); err != nil && r.Context().Err() == nil {
 		log.Printf("[preview][push] stream failed: %v", err)
 	}
+}
+
+func (m *pushModule) previewWebRTCOffer(w http.ResponseWriter, r *http.Request) {
+	if m.deps.WebRTCPreview == nil {
+		httpapi.Error(w, -1, "webrtc preview service not configured", http.StatusInternalServerError)
+		return
+	}
+	var req struct {
+		Type string `json:"type"`
+		SDP  string `json:"sdp"`
+	}
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusBadRequest)
+		return
+	}
+	setting, err := m.deps.Store.GetPushSetting(r.Context())
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	sourceURL, err := resolvePushWebRTCPreviewSource(setting)
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	answer, err := m.deps.WebRTCPreview.StartRTSPPreview(r.Context(), sourceURL, req.SDP)
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	httpapi.OK(w, answer)
+}
+
+func (m *pushModule) previewWebRTCClose(w http.ResponseWriter, r *http.Request) {
+	if m.deps.WebRTCPreview == nil {
+		httpapi.OKMessage(w, "webrtc preview service disabled")
+		return
+	}
+	var req struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusBadRequest)
+		return
+	}
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" {
+		httpapi.OKMessage(w, "empty session id, ignored")
+		return
+	}
+	m.deps.WebRTCPreview.CloseSession(sessionID)
+	httpapi.OKMessage(w, "closed")
+}
+
+func resolvePushWebRTCPreviewSource(setting *store.PushSetting) (string, error) {
+	if setting == nil {
+		return "", errors.New("missing push setting")
+	}
+	if setting.MultiInputEnabled {
+		source := pickPrimaryRTSPFromMulti(setting.MultiInputMeta, setting.MultiInputURLs)
+		if source != "" {
+			return source, nil
+		}
+	}
+	switch setting.InputType {
+	case store.InputTypeRTSP, store.InputTypeONVIF:
+		source := strings.TrimSpace(setting.RTSPURL)
+		if !isRTSPSourceURL(source) {
+			return "", errors.New("webrtc preview currently requires rtsp/rtsps input source")
+		}
+		return source, nil
+	case store.InputTypeGB28181:
+		source := strings.TrimSpace(setting.GBPullURL)
+		if !isRTSPSourceURL(source) {
+			return "", errors.New("gb28181 webrtc preview currently requires rtsp/rtsps pull url")
+		}
+		return source, nil
+	default:
+		return "", errors.New("webrtc preview currently supports rtsp/onvif/gb28181(rtsp) only")
+	}
+}
+
+func pickPrimaryRTSPFromMulti(meta []store.MultiInputSource, urls []string) string {
+	for _, item := range meta {
+		value := strings.TrimSpace(item.URL)
+		if value == "" || !isRTSPSourceURL(value) {
+			continue
+		}
+		if item.Primary {
+			return value
+		}
+	}
+	for _, item := range meta {
+		value := strings.TrimSpace(item.URL)
+		if value != "" && isRTSPSourceURL(value) {
+			return value
+		}
+	}
+	for _, value := range urls {
+		item := strings.TrimSpace(value)
+		if item != "" && isRTSPSourceURL(item) {
+			return item
+		}
+	}
+	return ""
+}
+
+func isRTSPSourceURL(raw string) bool {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	return strings.HasPrefix(value, "rtsp://") || strings.HasPrefix(value, "rtsps://")
 }
 
 func (m *pushModule) devices(w http.ResponseWriter, r *http.Request) {

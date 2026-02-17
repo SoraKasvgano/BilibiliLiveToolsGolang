@@ -37,6 +37,7 @@ func (m *cameraModule) Routes() []router.Route {
 		{Method: http.MethodPost, Pattern: "/delete", Summary: "Delete camera sources", Handler: m.delete},
 		{Method: http.MethodPost, Pattern: "/{id}/apply-push", Summary: "Apply camera source to push setting", Handler: m.applyPush},
 		{Method: http.MethodGet, Pattern: "/{id}/preview/mjpeg", Summary: "Preview selected camera source as MJPEG stream", Handler: m.preview},
+		{Method: http.MethodPost, Pattern: "/{id}/preview/webrtc/offer", Summary: "Preview selected camera source via WebRTC (RTSP/H264)", Handler: m.previewWebRTCOffer},
 	}
 }
 
@@ -262,6 +263,64 @@ func (m *cameraModule) preview(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := streamPreviewCommand(w, r, command, args, previewDebugEnabled(m.deps)); err != nil && r.Context().Err() == nil {
 		log.Printf("[preview][camera:%d] stream failed: %v", id, err)
+	}
+}
+
+func (m *cameraModule) previewWebRTCOffer(w http.ResponseWriter, r *http.Request) {
+	if m.deps.WebRTCPreview == nil {
+		httpapi.Error(w, -1, "webrtc preview service not configured", http.StatusInternalServerError)
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		httpapi.Error(w, -1, "invalid camera source id", http.StatusBadRequest)
+		return
+	}
+	camera, err := m.deps.Store.GetCameraSourceByID(r.Context(), id)
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	sourceURL, err := resolveCameraWebRTCPreviewSource(camera)
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	var req struct {
+		Type string `json:"type"`
+		SDP  string `json:"sdp"`
+	}
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusBadRequest)
+		return
+	}
+	answer, err := m.deps.WebRTCPreview.StartRTSPPreview(r.Context(), sourceURL, req.SDP)
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	httpapi.OK(w, answer)
+}
+
+func resolveCameraWebRTCPreviewSource(camera *store.CameraSource) (string, error) {
+	if camera == nil {
+		return "", errors.New("camera source is required")
+	}
+	switch camera.SourceType {
+	case store.CameraSourceTypeRTSP, store.CameraSourceTypeONVIF:
+		source := strings.TrimSpace(camera.RTSPURL)
+		if !isRTSPSourceURL(source) {
+			return "", errors.New("webrtc preview currently requires rtsp/rtsps url")
+		}
+		return source, nil
+	case store.CameraSourceTypeGB28181:
+		source := strings.TrimSpace(camera.GBPullURL)
+		if !isRTSPSourceURL(source) {
+			return "", errors.New("gb28181 webrtc preview currently requires rtsp/rtsps pull url")
+		}
+		return source, nil
+	default:
+		return "", errors.New("webrtc preview currently supports rtsp/onvif/gb28181(rtsp) camera source only")
 	}
 }
 
