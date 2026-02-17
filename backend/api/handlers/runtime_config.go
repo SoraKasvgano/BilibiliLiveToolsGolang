@@ -148,6 +148,48 @@ func decodeConfigPatch(r *http.Request, base config.Config) (config.Config, erro
 	if value, ok := getString(req, "biliBuild"); ok {
 		base.BiliBuild = value
 	}
+	if value, ok := getBool(req, "gb28181Enabled"); ok {
+		base.GB28181Enabled = value
+	}
+	if value, ok := getString(req, "gb28181ListenIp"); ok {
+		base.GB28181ListenIP = value
+	}
+	if value, ok := getInt(req, "gb28181ListenPort"); ok {
+		base.GB28181ListenPort = value
+	}
+	if value, ok := getString(req, "gb28181Transport"); ok {
+		base.GB28181Transport = value
+	}
+	if value, ok := getString(req, "gb28181ServerId"); ok {
+		base.GB28181ServerID = value
+	}
+	if value, ok := getString(req, "gb28181Realm"); ok {
+		base.GB28181Realm = value
+	}
+	if value, ok := getString(req, "gb28181Password"); ok {
+		base.GB28181Password = value
+	}
+	if value, ok := getInt(req, "gb28181RegisterExpires"); ok {
+		base.GB28181RegisterExpires = value
+	}
+	if value, ok := getInt(req, "gb28181HeartbeatInterval"); ok {
+		base.GB28181HeartbeatInterval = value
+	}
+	if value, ok := getString(req, "gb28181MediaIp"); ok {
+		base.GB28181MediaIP = value
+	}
+	if value, ok := getInt(req, "gb28181MediaPort"); ok {
+		base.GB28181MediaPort = value
+	}
+	if value, ok := getInt(req, "gb28181MediaPortStart"); ok {
+		base.GB28181MediaPortStart = value
+	}
+	if value, ok := getInt(req, "gb28181MediaPortEnd"); ok {
+		base.GB28181MediaPortEnd = value
+	}
+	if value, ok := getInt(req, "gb28181AckTimeoutSec"); ok {
+		base.GB28181AckTimeoutSec = value
+	}
 	return base, nil
 }
 
@@ -164,8 +206,38 @@ func restartRequiredChangedFields(oldCfg config.Config, newCfg config.Config) []
 	appendIfChanged("dbPath", oldCfg.DBPath, newCfg.DBPath)
 	appendIfChanged("mediaDir", oldCfg.MediaDir, newCfg.MediaDir)
 	appendIfChanged("allowOrigin", oldCfg.AllowOrigin, newCfg.AllowOrigin)
+	appendIfChanged("gb28181ListenIp", oldCfg.GB28181ListenIP, newCfg.GB28181ListenIP)
+	appendIfChanged("gb28181Transport", oldCfg.GB28181Transport, newCfg.GB28181Transport)
+	appendIfChanged("gb28181ServerId", oldCfg.GB28181ServerID, newCfg.GB28181ServerID)
+	appendIfChanged("gb28181Realm", oldCfg.GB28181Realm, newCfg.GB28181Realm)
+	appendIfChanged("gb28181Password", oldCfg.GB28181Password, newCfg.GB28181Password)
+	appendIfChanged("gb28181MediaIp", oldCfg.GB28181MediaIP, newCfg.GB28181MediaIP)
 	if oldCfg.LogBufferSize != newCfg.LogBufferSize {
 		result = append(result, "logBufferSize")
+	}
+	if oldCfg.GB28181Enabled != newCfg.GB28181Enabled {
+		result = append(result, "gb28181Enabled")
+	}
+	if oldCfg.GB28181ListenPort != newCfg.GB28181ListenPort {
+		result = append(result, "gb28181ListenPort")
+	}
+	if oldCfg.GB28181RegisterExpires != newCfg.GB28181RegisterExpires {
+		result = append(result, "gb28181RegisterExpires")
+	}
+	if oldCfg.GB28181HeartbeatInterval != newCfg.GB28181HeartbeatInterval {
+		result = append(result, "gb28181HeartbeatInterval")
+	}
+	if oldCfg.GB28181MediaPort != newCfg.GB28181MediaPort {
+		result = append(result, "gb28181MediaPort")
+	}
+	if oldCfg.GB28181MediaPortStart != newCfg.GB28181MediaPortStart {
+		result = append(result, "gb28181MediaPortStart")
+	}
+	if oldCfg.GB28181MediaPortEnd != newCfg.GB28181MediaPortEnd {
+		result = append(result, "gb28181MediaPortEnd")
+	}
+	if oldCfg.GB28181AckTimeoutSec != newCfg.GB28181AckTimeoutSec {
+		result = append(result, "gb28181AckTimeoutSec")
 	}
 	return result
 }
@@ -174,6 +246,7 @@ func runtimeHotReloadNotes() []string {
 	return []string{
 		"Dynamic hot reload now applies to ffmpegPath/ffprobePath and Bilibili API credentials/metadata.",
 		"debugMode/enableDebugLogs now hot apply to data/log file logging and ffmpeg verbose mirror.",
+		"GB28181 signaling and media port pool settings can be edited here; runtime service will apply on next start/restart.",
 		"All other fields are persisted, but restart is required before they fully apply.",
 	}
 }

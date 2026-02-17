@@ -79,6 +79,12 @@ func (m *cameraModule) save(w http.ResponseWriter, r *http.Request) {
 		SourceType          string `json:"sourceType"`
 		RTSPURL             string `json:"rtspUrl"`
 		MJPEGURL            string `json:"mjpegUrl"`
+		RTMPURL             string `json:"rtmpUrl"`
+		GBPullURL           string `json:"gbPullUrl"`
+		GBDeviceID          string `json:"gbDeviceId"`
+		GBChannelID         string `json:"gbChannelId"`
+		GBServer            string `json:"gbServer"`
+		GBTransport         string `json:"gbTransport"`
 		ONVIFEndpoint       string `json:"onvifEndpoint"`
 		ONVIFUsername       string `json:"onvifUsername"`
 		ONVIFPassword       string `json:"onvifPassword"`
@@ -109,6 +115,12 @@ func (m *cameraModule) save(w http.ResponseWriter, r *http.Request) {
 		SourceType:          raw.SourceType,
 		RTSPURL:             raw.RTSPURL,
 		MJPEGURL:            raw.MJPEGURL,
+		RTMPURL:             raw.RTMPURL,
+		GBPullURL:           raw.GBPullURL,
+		GBDeviceID:          raw.GBDeviceID,
+		GBChannelID:         raw.GBChannelID,
+		GBServer:            raw.GBServer,
+		GBTransport:         raw.GBTransport,
 		ONVIFEndpoint:       raw.ONVIFEndpoint,
 		ONVIFUsername:       raw.ONVIFUsername,
 		ONVIFPassword:       raw.ONVIFPassword,
@@ -167,14 +179,20 @@ func (m *cameraModule) applyPush(w http.ResponseWriter, r *http.Request) {
 		updateReq.InputType = string(store.InputTypeRTSP)
 		updateReq.RTSPURL = camera.RTSPURL
 		updateReq.MJPEGURL = ""
+		updateReq.RTMPURL = ""
+		updateReq.GBPullURL = ""
 	case store.CameraSourceTypeMJPEG:
 		updateReq.InputType = string(store.InputTypeMJPEG)
 		updateReq.MJPEGURL = camera.MJPEGURL
 		updateReq.RTSPURL = ""
+		updateReq.RTMPURL = ""
+		updateReq.GBPullURL = ""
 	case store.CameraSourceTypeONVIF:
 		updateReq.InputType = string(store.InputTypeONVIF)
 		updateReq.RTSPURL = camera.RTSPURL
 		updateReq.MJPEGURL = ""
+		updateReq.RTMPURL = ""
+		updateReq.GBPullURL = ""
 		updateReq.ONVIFEndpoint = camera.ONVIFEndpoint
 		updateReq.ONVIFUsername = camera.ONVIFUsername
 		updateReq.ONVIFPassword = camera.ONVIFPassword
@@ -183,9 +201,23 @@ func (m *cameraModule) applyPush(w http.ResponseWriter, r *http.Request) {
 		updateReq.InputType = string(store.InputTypeUSBCamera)
 		updateReq.RTSPURL = ""
 		updateReq.MJPEGURL = ""
+		updateReq.RTMPURL = ""
+		updateReq.GBPullURL = ""
 		updateReq.InputDeviceName = camera.USBDeviceName
 		updateReq.InputDeviceResolution = camera.USBDeviceResolution
 		updateReq.InputDeviceFramerate = camera.USBDeviceFramerate
+	case store.CameraSourceTypeRTMP:
+		updateReq.InputType = string(store.InputTypeRTMP)
+		updateReq.RTSPURL = ""
+		updateReq.MJPEGURL = ""
+		updateReq.RTMPURL = camera.RTMPURL
+		updateReq.GBPullURL = ""
+	case store.CameraSourceTypeGB28181:
+		updateReq.InputType = string(store.InputTypeGB28181)
+		updateReq.RTSPURL = ""
+		updateReq.MJPEGURL = ""
+		updateReq.RTMPURL = ""
+		updateReq.GBPullURL = camera.GBPullURL
 	default:
 		httpapi.Error(w, -1, "unsupported camera source type", http.StatusOK)
 		return
@@ -244,6 +276,8 @@ func buildCameraPreviewSetting(camera *store.CameraSource) (*store.PushSetting, 
 		InputDeviceFramerate:  camera.USBDeviceFramerate,
 		RTSPURL:               strings.TrimSpace(camera.RTSPURL),
 		MJPEGURL:              strings.TrimSpace(camera.MJPEGURL),
+		RTMPURL:               strings.TrimSpace(camera.RTMPURL),
+		GBPullURL:             strings.TrimSpace(camera.GBPullURL),
 	}
 	switch camera.SourceType {
 	case store.CameraSourceTypeRTSP:
@@ -273,6 +307,16 @@ func buildCameraPreviewSetting(camera *store.CameraSource) (*store.PushSetting, 
 		if setting.InputDeviceName == "" {
 			return nil, errors.New("usb device name is required for preview")
 		}
+	case store.CameraSourceTypeRTMP:
+		setting.InputType = store.InputTypeRTMP
+		if setting.RTMPURL == "" {
+			return nil, errors.New("rtmp url is required for preview")
+		}
+	case store.CameraSourceTypeGB28181:
+		setting.InputType = store.InputTypeGB28181
+		if setting.GBPullURL == "" {
+			return nil, errors.New("gb28181 pull url is required for preview")
+		}
 	default:
 		return nil, errors.New("unsupported camera type")
 	}
@@ -299,6 +343,8 @@ func buildPushUpdateRequest(item *store.PushSetting) store.PushSettingUpdateRequ
 		InputDevicePlugins:    item.InputDevicePlugins,
 		RTSPURL:               item.RTSPURL,
 		MJPEGURL:              item.MJPEGURL,
+		RTMPURL:               item.RTMPURL,
+		GBPullURL:             item.GBPullURL,
 		ONVIFEndpoint:         item.ONVIFEndpoint,
 		ONVIFUsername:         item.ONVIFUsername,
 		ONVIFPassword:         item.ONVIFPassword,

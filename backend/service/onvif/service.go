@@ -46,7 +46,10 @@ type Capabilities struct {
 }
 
 type Profile struct {
-	Token string `json:"token"`
+	Token     string `json:"token"`
+	Name      string `json:"name,omitempty"`
+	RTSPURL   string `json:"rtspUrl,omitempty"`
+	Preferred bool   `json:"preferred,omitempty"`
 }
 
 type DiscoveredDevice struct {
@@ -695,12 +698,65 @@ func (s *Service) GetProfiles(ctx context.Context, endpoint string, username str
 	if err != nil {
 		return nil, err
 	}
-	matches := regexp.MustCompile(`token="([^"]+)"`).FindAllStringSubmatch(body, -1)
-	if len(matches) == 0 {
+	profiles := parseProfilesFromResponse(body)
+	if len(profiles) == 0 {
 		return nil, errors.New("no onvif profiles found")
 	}
+	for idx := range profiles {
+		streamURL, streamErr := s.getProfileStreamURI(ctx, caps.MediaXAddr, profiles[idx].Token, username, password)
+		if streamErr == nil && streamURL != "" {
+			profiles[idx].RTSPURL = streamURL
+		}
+	}
+	setPreferredProfile(profiles)
+	return profiles, nil
+}
+
+func parseProfilesFromResponse(body string) []Profile {
+	if strings.TrimSpace(body) == "" {
+		return nil
+	}
+	decoder := xml.NewDecoder(strings.NewReader(body))
+	type profileNode struct {
+		Token string `xml:"token,attr"`
+		Name  string `xml:"Name"`
+	}
 	uniq := map[string]struct{}{}
-	profiles := make([]Profile, 0, len(matches))
+	result := make([]Profile, 0, 8)
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return result
+		}
+		start, ok := tok.(xml.StartElement)
+		if !ok || !strings.EqualFold(start.Name.Local, "Profiles") {
+			continue
+		}
+		node := profileNode{}
+		if err := decoder.DecodeElement(&node, &start); err != nil {
+			continue
+		}
+		token := strings.TrimSpace(node.Token)
+		if token == "" {
+			continue
+		}
+		if _, exists := uniq[token]; exists {
+			continue
+		}
+		uniq[token] = struct{}{}
+		result = append(result, Profile{
+			Token: token,
+			Name:  strings.TrimSpace(node.Name),
+		})
+	}
+	if len(result) > 0 {
+		return result
+	}
+	// Fallback for non-standard XML layout.
+	matches := regexp.MustCompile(`token="([^"]+)"`).FindAllStringSubmatch(body, -1)
 	for _, m := range matches {
 		if len(m) < 2 {
 			continue
@@ -709,14 +765,78 @@ func (s *Service) GetProfiles(ctx context.Context, endpoint string, username str
 		if token == "" {
 			continue
 		}
-		if _, ok := uniq[token]; ok {
+		if _, exists := uniq[token]; exists {
 			continue
 		}
 		uniq[token] = struct{}{}
-		profiles = append(profiles, Profile{Token: token})
+		result = append(result, Profile{Token: token})
 	}
-	sort.Slice(profiles, func(i, j int) bool { return profiles[i].Token < profiles[j].Token })
-	return profiles, nil
+	return result
+}
+
+func setPreferredProfile(items []Profile) {
+	for idx := range items {
+		if strings.TrimSpace(items[idx].RTSPURL) == "" {
+			continue
+		}
+		items[idx].Preferred = true
+		return
+	}
+	if len(items) > 0 {
+		items[0].Preferred = true
+	}
+}
+
+func (s *Service) getProfileStreamURI(ctx context.Context, mediaXAddr string, profileToken string, username string, password string) (string, error) {
+	profileToken = strings.TrimSpace(profileToken)
+	if profileToken == "" {
+		return "", errors.New("profile token is required")
+	}
+	env := fmt.Sprintf(
+		`<trt:GetStreamUri xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">`+
+			`<trt:StreamSetup><tt:Stream>RTP-Unicast</tt:Stream><tt:Transport><tt:Protocol>RTSP</tt:Protocol></tt:Transport></trt:StreamSetup>`+
+			`<trt:ProfileToken>%s</trt:ProfileToken></trt:GetStreamUri>`,
+		xmlEscape(profileToken),
+	)
+	body, err := s.callSOAP(ctx, mediaXAddr, "http://www.onvif.org/ver10/media/wsdl/GetStreamUri", env, username, password)
+	if err != nil {
+		return "", err
+	}
+	streamURI := strings.TrimSpace(firstTagValue(body, "Uri"))
+	if streamURI == "" {
+		streamURI = strings.TrimSpace(firstTagValue(body, "URI"))
+	}
+	if streamURI == "" {
+		return "", errors.New("stream uri not found")
+	}
+	return injectRTSPAuth(streamURI, username, password), nil
+}
+
+func injectRTSPAuth(rawURL string, username string, password string) string {
+	value := strings.TrimSpace(rawURL)
+	if value == "" {
+		return value
+	}
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	if !strings.EqualFold(strings.TrimSpace(parsed.Scheme), "rtsp") {
+		return value
+	}
+	if parsed.User != nil && strings.TrimSpace(parsed.User.Username()) != "" {
+		return value
+	}
+	if strings.TrimSpace(password) == "" {
+		parsed.User = url.User(username)
+	} else {
+		parsed.User = url.UserPassword(username, password)
+	}
+	return parsed.String()
 }
 
 func (s *Service) ExecuteCommand(ctx context.Context, req CommandRequest) (map[string]any, error) {
@@ -760,6 +880,13 @@ func (s *Service) ExecuteCommand(ctx context.Context, req CommandRequest) (map[s
 	}
 
 	action := req.Action
+	resultData := map[string]any{
+		"ok":           true,
+		"action":       action,
+		"profileToken": req.ProfileToken,
+		"ptzXAddr":     caps.PTZXAddr,
+		"mediaXAddr":   caps.MediaXAddr,
+	}
 	switch action {
 	case "left", "right", "up", "down", "zoom_in", "zoom_out":
 		pan, tilt, zoom := velocityByAction(action, req.Speed)
@@ -787,17 +914,49 @@ func (s *Service) ExecuteCommand(ctx context.Context, req CommandRequest) (map[s
 		if err != nil {
 			return nil, err
 		}
+	case "relative":
+		err = s.relativeMove(ctx, caps.PTZXAddr, req.Username, req.Password, req.ProfileToken, req.Pan, req.Tilt, req.Zoom)
+		if err != nil {
+			return nil, err
+		}
+	case "status":
+		status, statusErr := s.getStatus(ctx, caps.PTZXAddr, req.Username, req.Password, req.ProfileToken)
+		if statusErr != nil {
+			return nil, statusErr
+		}
+		resultData["status"] = status
+	case "goto_preset", "preset_goto":
+		if strings.TrimSpace(req.PresetToken) == "" {
+			return nil, errors.New("preset token is required for goto_preset")
+		}
+		err = s.gotoPreset(ctx, caps.PTZXAddr, req.Username, req.Password, req.ProfileToken, req.PresetToken, req.Speed)
+		if err != nil {
+			return nil, err
+		}
+		resultData["presetToken"] = req.PresetToken
+	case "set_preset", "preset_set":
+		token, setErr := s.setPreset(ctx, caps.PTZXAddr, req.Username, req.Password, req.ProfileToken, req.PresetToken)
+		if setErr != nil {
+			return nil, setErr
+		}
+		if token != "" {
+			req.PresetToken = token
+		}
+		resultData["presetToken"] = req.PresetToken
+	case "remove_preset", "preset_remove":
+		if strings.TrimSpace(req.PresetToken) == "" {
+			return nil, errors.New("preset token is required for remove_preset")
+		}
+		err = s.removePreset(ctx, caps.PTZXAddr, req.Username, req.Password, req.ProfileToken, req.PresetToken)
+		if err != nil {
+			return nil, err
+		}
+		resultData["presetToken"] = req.PresetToken
 	default:
 		return nil, fmt.Errorf("unsupported ptz action: %s", action)
 	}
 
-	return map[string]any{
-		"ok":           true,
-		"action":       action,
-		"profileToken": req.ProfileToken,
-		"ptzXAddr":     caps.PTZXAddr,
-		"mediaXAddr":   caps.MediaXAddr,
-	}, nil
+	return resultData, nil
 }
 
 func (s *Service) continuousMove(ctx context.Context, ptzXAddr string, username string, password string, profileToken string, pan float64, tilt float64, zoom float64) error {
@@ -822,6 +981,72 @@ func (s *Service) absoluteMove(ctx context.Context, ptzXAddr string, username st
 	env := fmt.Sprintf(`<tptz:AbsoluteMove xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema"><tptz:ProfileToken>%s</tptz:ProfileToken><tptz:Position><tt:PanTilt x="%.3f" y="%.3f"/><tt:Zoom x="%.3f"/></tptz:Position></tptz:AbsoluteMove>`, xmlEscape(profileToken), pan, tilt, zoom)
 	_, err := s.callSOAP(ctx, ptzXAddr, "http://www.onvif.org/ver20/ptz/wsdl/AbsoluteMove", env, username, password)
 	return err
+}
+
+func (s *Service) relativeMove(ctx context.Context, ptzXAddr string, username string, password string, profileToken string, pan float64, tilt float64, zoom float64) error {
+	env := fmt.Sprintf(`<tptz:RelativeMove xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema"><tptz:ProfileToken>%s</tptz:ProfileToken><tptz:Translation><tt:PanTilt x="%.3f" y="%.3f"/><tt:Zoom x="%.3f"/></tptz:Translation></tptz:RelativeMove>`, xmlEscape(profileToken), pan, tilt, zoom)
+	_, err := s.callSOAP(ctx, ptzXAddr, "http://www.onvif.org/ver20/ptz/wsdl/RelativeMove", env, username, password)
+	return err
+}
+
+func (s *Service) gotoPreset(ctx context.Context, ptzXAddr string, username string, password string, profileToken string, presetToken string, speed float64) error {
+	velocity := ""
+	if speed > 0 {
+		velocity = fmt.Sprintf(`<tptz:Speed><tt:PanTilt x="%.3f" y="%.3f"/><tt:Zoom x="%.3f"/></tptz:Speed>`, speed, speed, speed)
+	}
+	env := fmt.Sprintf(`<tptz:GotoPreset xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema"><tptz:ProfileToken>%s</tptz:ProfileToken><tptz:PresetToken>%s</tptz:PresetToken>%s</tptz:GotoPreset>`, xmlEscape(profileToken), xmlEscape(presetToken), velocity)
+	_, err := s.callSOAP(ctx, ptzXAddr, "http://www.onvif.org/ver20/ptz/wsdl/GotoPreset", env, username, password)
+	return err
+}
+
+func (s *Service) setPreset(ctx context.Context, ptzXAddr string, username string, password string, profileToken string, presetToken string) (string, error) {
+	presetField := ""
+	if strings.TrimSpace(presetToken) != "" {
+		presetField = fmt.Sprintf(`<tptz:PresetToken>%s</tptz:PresetToken>`, xmlEscape(presetToken))
+	}
+	env := fmt.Sprintf(`<tptz:SetPreset xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl"><tptz:ProfileToken>%s</tptz:ProfileToken>%s</tptz:SetPreset>`, xmlEscape(profileToken), presetField)
+	body, err := s.callSOAP(ctx, ptzXAddr, "http://www.onvif.org/ver20/ptz/wsdl/SetPreset", env, username, password)
+	if err != nil {
+		return "", err
+	}
+	token := firstTagValue(body, "PresetToken")
+	if token == "" {
+		token = firstTagValue(body, "presetToken")
+	}
+	return strings.TrimSpace(token), nil
+}
+
+func (s *Service) removePreset(ctx context.Context, ptzXAddr string, username string, password string, profileToken string, presetToken string) error {
+	env := fmt.Sprintf(`<tptz:RemovePreset xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl"><tptz:ProfileToken>%s</tptz:ProfileToken><tptz:PresetToken>%s</tptz:PresetToken></tptz:RemovePreset>`, xmlEscape(profileToken), xmlEscape(presetToken))
+	_, err := s.callSOAP(ctx, ptzXAddr, "http://www.onvif.org/ver20/ptz/wsdl/RemovePreset", env, username, password)
+	return err
+}
+
+func (s *Service) getStatus(ctx context.Context, ptzXAddr string, username string, password string, profileToken string) (map[string]any, error) {
+	env := fmt.Sprintf(`<tptz:GetStatus xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl"><tptz:ProfileToken>%s</tptz:ProfileToken></tptz:GetStatus>`, xmlEscape(profileToken))
+	body, err := s.callSOAP(ctx, ptzXAddr, "http://www.onvif.org/ver20/ptz/wsdl/GetStatus", env, username, password)
+	if err != nil {
+		return nil, err
+	}
+	status := map[string]any{
+		"raw": body,
+	}
+	if pan, ok := extractXMLAttributeFloat(body, "PanTilt", "x"); ok {
+		status["pan"] = pan
+	}
+	if tilt, ok := extractXMLAttributeFloat(body, "PanTilt", "y"); ok {
+		status["tilt"] = tilt
+	}
+	if zoom, ok := extractXMLAttributeFloat(body, "Zoom", "x"); ok {
+		status["zoom"] = zoom
+	}
+	if move := strings.TrimSpace(firstTagValue(body, "MoveStatus")); move != "" {
+		status["moveStatus"] = move
+	}
+	if utc := strings.TrimSpace(firstTagValue(body, "UtcTime")); utc != "" {
+		status["utcTime"] = utc
+	}
+	return status, nil
 }
 
 func (s *Service) callSOAP(ctx context.Context, endpoint string, action string, body string, username string, password string) (string, error) {
@@ -1142,6 +1367,22 @@ func firstTagValue(xmlBody string, localName string) string {
 		return ""
 	}
 	return strings.TrimSpace(matches[1])
+}
+
+func extractXMLAttributeFloat(xmlBody string, localName string, attrName string) (float64, bool) {
+	if strings.TrimSpace(xmlBody) == "" || strings.TrimSpace(localName) == "" || strings.TrimSpace(attrName) == "" {
+		return 0, false
+	}
+	pattern := `(?is)<(?:[a-zA-Z0-9_]+:)?` + regexp.QuoteMeta(localName) + `\b[^>]*\b` + regexp.QuoteMeta(attrName) + `\s*=\s*"(.*?)"[^>]*>`
+	matches := regexp.MustCompile(pattern).FindStringSubmatch(xmlBody)
+	if len(matches) < 2 {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(strings.TrimSpace(matches[1]), 64)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
 }
 
 func splitSpaceSeparated(raw string) []string {

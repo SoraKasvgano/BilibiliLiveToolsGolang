@@ -1,0 +1,806 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GB28181 平台接入</title>
+  <link rel="stylesheet" href="/app/pages/shared.css" />
+</head>
+<body>
+  <header class="shared-header">
+    <div id="sharedNav"></div>
+  </header>
+
+  <main class="page-shell">
+    <section class="page-card">
+      <h1>GB28181 平台接入</h1>
+      <p class="soft-note">用于做 GB28181 平台侧接入：设备注册、保活、目录查询、INVITE/BYE 会话控制，并可把拉流地址复用到推流配置。</p>
+      <div id="roleTip" class="role-tip"></div>
+      <div class="grid two" style="margin-top:8px;">
+        <div class="soft-panel">
+          <h3>运行状态</h3>
+          <p><span id="gbRunningBadge" class="badge badge-neutral">检查中</span></p>
+          <p id="gbStatusText" class="soft-note">尚未读取状态。</p>
+        </div>
+        <div class="soft-panel">
+          <h3>快速操作</h3>
+          <div class="actions">
+            <button id="btnGBStatus">刷新状态</button>
+            <button id="btnGBStart" class="btn-success">启动服务</button>
+            <button id="btnGBStop" class="btn-danger">停止服务</button>
+          </div>
+        </div>
+      </div>
+      <pre id="gbStatusBox">{}</pre>
+    </section>
+
+    <section class="page-card">
+      <h2>平台配置</h2>
+      <div class="grid two">
+        <label>启用平台
+          <select id="gbEnabled">
+            <option value="true">启用</option>
+            <option value="false">停用</option>
+          </select>
+        </label>
+        <label>传输协议
+          <select id="gbTransport">
+            <option value="udp">UDP</option>
+            <option value="tcp">TCP</option>
+            <option value="both">UDP + TCP</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>监听 IP
+          <input id="gbListenIp" value="0.0.0.0" />
+        </label>
+        <label>监听端口
+          <input id="gbListenPort" type="number" value="5060" min="1" />
+        </label>
+      </div>
+      <div class="grid two">
+        <label>平台 ServerID
+          <input id="gbServerId" placeholder="34020000002000000001" />
+        </label>
+        <label>Realm
+          <input id="gbRealm" placeholder="3402000000" />
+        </label>
+      </div>
+      <div class="grid two">
+        <label>平台密码（明文）
+          <input id="gbPassword" type="text" placeholder="123456" />
+        </label>
+        <label>注册有效期（秒）
+          <input id="gbRegisterExpires" type="number" value="3600" min="30" />
+        </label>
+      </div>
+      <div class="grid two">
+        <label>心跳间隔（秒）
+          <input id="gbHeartbeatInterval" type="number" value="60" min="5" />
+        </label>
+        <label>ACK 超时（秒）
+          <input id="gbAckTimeoutSec" type="number" value="10" min="3" />
+        </label>
+      </div>
+      <div class="grid two">
+        <label>媒体 IP（可空，自动推断）
+          <input id="gbMediaIp" placeholder="192.168.1.100" />
+        </label>
+        <label>媒体端口
+          <input id="gbMediaPort" type="number" value="30000" min="1" />
+        </label>
+      </div>
+      <div class="grid two">
+        <label>媒体端口池起始
+          <input id="gbMediaPortStart" type="number" value="30000" min="1" />
+        </label>
+        <label>媒体端口池结束
+          <input id="gbMediaPortEnd" type="number" value="30100" min="1" />
+        </label>
+      </div>
+      <div class="actions">
+        <button id="btnGBConfigLoad">读取配置</button>
+        <button id="btnGBConfigSave" class="btn-success">保存配置</button>
+      </div>
+    </section>
+
+    <section class="page-card">
+      <h2>设备管理（注册设备/手工设备）</h2>
+      <div class="grid two">
+        <label>关键词
+          <input id="gbKeyword" placeholder="设备ID/名称/地址" />
+        </label>
+        <label>状态筛选
+          <select id="gbStatusFilter">
+            <option value="">全部</option>
+            <option value="online">在线</option>
+            <option value="offline">离线</option>
+            <option value="unknown">未知</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>页码
+          <input id="gbPage" type="number" value="1" min="1" />
+        </label>
+        <label>每页数量
+          <input id="gbLimit" type="number" value="20" min="1" max="200" />
+        </label>
+      </div>
+      <div class="actions">
+        <button id="btnGBList">刷新设备列表</button>
+      </div>
+
+      <div class="soft-panel">
+        <h3>设备编辑</h3>
+        <input id="gbDeviceIdHidden" type="hidden" />
+        <div class="grid two">
+          <label>设备 ID
+            <input id="gbDeviceId" placeholder="34020000001320000001" />
+          </label>
+          <label>名称
+            <input id="gbDeviceName" placeholder="门口摄像头" />
+          </label>
+        </div>
+        <div class="grid two">
+          <label>传输
+            <select id="gbDeviceTransport">
+              <option value="udp">UDP</option>
+              <option value="tcp">TCP</option>
+            </select>
+          </label>
+          <label>设备认证密码（明文）
+            <input id="gbDeviceAuthPassword" type="text" placeholder="留空=使用平台默认密码" />
+          </label>
+        </div>
+        <div class="grid two">
+          <label>设备信令地址（host:port）
+            <input id="gbDeviceRemoteAddr" placeholder="192.168.1.20:5060" />
+          </label>
+          <label>启用状态
+            <select id="gbDeviceEnabled">
+              <option value="true">启用</option>
+              <option value="false">停用</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnGBDeviceNew">新建</button>
+          <button id="btnGBDeviceSave" class="btn-success">保存设备</button>
+          <button id="btnGBDeviceDelete" class="btn-danger">删除当前设备</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>设备ID</th>
+              <th>名称</th>
+              <th>状态</th>
+              <th>传输</th>
+              <th>远端地址</th>
+              <th>最近保活</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="gbDeviceTableBody"></tbody>
+        </table>
+      </div>
+      <pre id="gbDeviceBox">{}</pre>
+    </section>
+
+    <section class="page-card">
+      <h2>通道与会话控制</h2>
+      <p id="gbSelectedDeviceText" class="soft-note">未选择设备。你可以在上面的设备列表点击“编辑”或“目录”。</p>
+
+      <div class="soft-panel">
+        <h3>通道列表</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>通道ID</th>
+                <th>名称</th>
+                <th>厂商/型号</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="gbChannelTableBody"></tbody>
+          </table>
+        </div>
+        <pre id="gbChannelBox">{}</pre>
+      </div>
+
+      <div class="soft-panel">
+        <h3>INVITE 点播</h3>
+        <div class="grid two">
+          <label>设备 ID
+            <input id="gbInviteDeviceId" placeholder="自动填充或手工填写" />
+          </label>
+          <label>通道 ID
+            <input id="gbInviteChannelId" placeholder="可从通道列表一键填充" />
+          </label>
+        </div>
+        <div class="grid two">
+          <label>媒体 IP（可空）
+            <input id="gbInviteMediaIp" placeholder="留空=按平台配置/自动推断" />
+          </label>
+          <label>媒体端口（可空）
+            <input id="gbInviteMediaPort" type="number" placeholder="30000" min="1" />
+          </label>
+        </div>
+        <div class="grid two">
+          <label>SSRC（可空）
+            <input id="gbInviteSSRC" placeholder="留空自动生成" />
+          </label>
+          <label>StreamID（可空）
+            <input id="gbInviteStreamId" placeholder="留空=通道ID" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnGBInvite" class="btn-success">发送 INVITE</button>
+          <button id="btnGBSessions">刷新会话</button>
+        </div>
+      </div>
+
+      <div class="soft-panel">
+        <h3>会话列表</h3>
+        <div class="grid two">
+          <label>状态筛选
+            <select id="gbSessionStatusFilter">
+              <option value="">全部</option>
+              <option value="inviting">inviting</option>
+              <option value="established">established</option>
+              <option value="failed">failed</option>
+              <option value="terminated">terminated</option>
+            </select>
+          </label>
+          <label>数量上限
+            <input id="gbSessionLimit" type="number" value="200" min="10" max="1000" />
+          </label>
+        </div>
+        <label style="margin-top:0;">
+          <input id="gbApplyPushAfterBind" type="checkbox" />
+          生成摄像头源后自动套用到推流配置
+        </label>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Call-ID</th>
+                <th>设备</th>
+                <th>通道</th>
+                <th>状态</th>
+                <th>更新时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="gbSessionTableBody"></tbody>
+          </table>
+        </div>
+        <pre id="gbSessionBox">{}</pre>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app/pages/shared.js"></script>
+  <script>
+    const { initPage, requestJSON, showJSON, bindAction, showToast, showConfirm, statusBadge } = window.GoverShared;
+    initPage({ active: "gb28181" });
+
+    const state = {
+      devices: [],
+      channels: [],
+      sessions: [],
+      selectedDeviceRowId: 0,
+    };
+
+    function getInput(id) {
+      return document.getElementById(id);
+    }
+
+    function val(id) {
+      return String(getInput(id).value || "").trim();
+    }
+
+    function intVal(id, fallback = 0) {
+      const value = Number(getInput(id).value || 0);
+      if (!Number.isFinite(value)) return fallback;
+      return Math.trunc(value);
+    }
+
+    function boolVal(id) {
+      return String(getInput(id).value || "").toLowerCase() === "true";
+    }
+
+    function setBadge(id, text, type) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.outerHTML = statusBadge(text, type).replace("<span", `<span id="${id}"`);
+    }
+
+    function statusType(status) {
+      const value = String(status || "").toLowerCase();
+      if (value === "online" || value === "established") return "success";
+      if (value === "inviting") return "warning";
+      if (value === "failed") return "danger";
+      if (value === "terminated" || value === "offline") return "neutral";
+      return "info";
+    }
+
+    function formatTime(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return date.toLocaleString();
+    }
+
+    function resetDeviceForm() {
+      getInput("gbDeviceIdHidden").value = "";
+      getInput("gbDeviceId").value = "";
+      getInput("gbDeviceName").value = "";
+      getInput("gbDeviceTransport").value = "udp";
+      getInput("gbDeviceAuthPassword").value = "";
+      getInput("gbDeviceRemoteAddr").value = "";
+      getInput("gbDeviceEnabled").value = "true";
+      state.selectedDeviceRowId = 0;
+      document.getElementById("gbSelectedDeviceText").textContent = "未选择设备。你可以在上面的设备列表点击“编辑”或“目录”。";
+      renderChannelTable([]);
+    }
+
+    function fillDeviceForm(item) {
+      getInput("gbDeviceIdHidden").value = String(item.id || "");
+      getInput("gbDeviceId").value = item.deviceId || "";
+      getInput("gbDeviceName").value = item.name || "";
+      getInput("gbDeviceTransport").value = item.transport || "udp";
+      getInput("gbDeviceAuthPassword").value = item.authPassword || "";
+      getInput("gbDeviceRemoteAddr").value = item.remoteAddr || "";
+      getInput("gbDeviceEnabled").value = item.status === "offline" ? "false" : "true";
+      state.selectedDeviceRowId = Number(item.id || 0);
+      getInput("gbInviteDeviceId").value = item.deviceId || "";
+      document.getElementById("gbSelectedDeviceText").textContent = `当前设备：${item.name || item.deviceId}（${item.deviceId}）`;
+    }
+
+    function readConfigForm() {
+      return {
+        enabled: boolVal("gbEnabled"),
+        listenIp: val("gbListenIp"),
+        listenPort: intVal("gbListenPort", 5060),
+        transport: val("gbTransport"),
+        serverId: val("gbServerId"),
+        realm: val("gbRealm"),
+        password: val("gbPassword"),
+        registerExpires: intVal("gbRegisterExpires", 3600),
+        heartbeatInterval: intVal("gbHeartbeatInterval", 60),
+        mediaIp: val("gbMediaIp"),
+        mediaPort: intVal("gbMediaPort", 30000),
+        mediaPortStart: intVal("gbMediaPortStart", 30000),
+        mediaPortEnd: intVal("gbMediaPortEnd", 30100),
+        ackTimeoutSec: intVal("gbAckTimeoutSec", 10),
+      };
+    }
+
+    function fillConfigForm(config) {
+      const cfg = config || {};
+      getInput("gbEnabled").value = String(Boolean(cfg.enabled));
+      getInput("gbListenIp").value = cfg.listenIp || "0.0.0.0";
+      getInput("gbListenPort").value = Number(cfg.listenPort || 5060);
+      getInput("gbTransport").value = cfg.transport || "udp";
+      getInput("gbServerId").value = cfg.serverId || "";
+      getInput("gbRealm").value = cfg.realm || "";
+      getInput("gbPassword").value = cfg.password || "";
+      getInput("gbRegisterExpires").value = Number(cfg.registerExpires || 3600);
+      getInput("gbHeartbeatInterval").value = Number(cfg.heartbeatInterval || 60);
+      getInput("gbMediaIp").value = cfg.mediaIp || "";
+      getInput("gbMediaPort").value = Number(cfg.mediaPort || 30000);
+      getInput("gbMediaPortStart").value = Number(cfg.mediaPortStart || 30000);
+      getInput("gbMediaPortEnd").value = Number(cfg.mediaPortEnd || 30100);
+      getInput("gbAckTimeoutSec").value = Number(cfg.ackTimeoutSec || 10);
+    }
+
+    function renderRuntimeStatus(status) {
+      const runtime = status || {};
+      const running = Boolean(runtime.running);
+      setBadge("gbRunningBadge", running ? "运行中" : "已停止", running ? "success" : "neutral");
+      const bind = Array.isArray(runtime.bindAddrs) ? runtime.bindAddrs.join(", ") : "";
+      document.getElementById("gbStatusText").textContent = `transport=${runtime.transport || "-"} | 收包=${runtime.received || 0} | 发包=${runtime.sent || 0} | 端口池=${runtime.mediaPortStart || 0}-${runtime.mediaPortEnd || 0} 使用=${runtime.mediaPortUsed || 0} 空闲=${runtime.mediaPortFree || 0} | bind=${bind || "-"} | lastError=${runtime.lastError || "-"}`;
+    }
+
+    async function loadConfig() {
+      const resp = await requestJSON("/api/v1/gb28181/config");
+      fillConfigForm(((resp || {}).data || {}).config || {});
+      showJSON("gbStatusBox", resp);
+      return resp;
+    }
+
+    async function saveConfig() {
+      const resp = await requestJSON("/api/v1/gb28181/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(readConfigForm()),
+      });
+      fillConfigForm(((resp || {}).data || {}).config || {});
+      showJSON("gbStatusBox", resp);
+      return resp;
+    }
+
+    async function refreshStatus() {
+      const resp = await requestJSON("/api/v1/gb28181/status");
+      renderRuntimeStatus((resp || {}).data || {});
+      showJSON("gbStatusBox", resp);
+      return resp;
+    }
+
+    function renderDeviceTable(items) {
+      const tbody = document.getElementById("gbDeviceTableBody");
+      if (!Array.isArray(items) || items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="table-empty">暂无设备。等待设备注册，或在上方手工添加。</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = items.map((item) => {
+        const status = String(item.status || "unknown");
+        return `
+          <tr>
+            <td>${item.id}</td>
+            <td>${item.deviceId || ""}</td>
+            <td>${item.name || ""}</td>
+            <td>${statusBadge(status, statusType(status))}</td>
+            <td>${item.transport || "udp"}</td>
+            <td>${item.remoteAddr || "-"}</td>
+            <td>${formatTime(item.lastKeepaliveAt || item.lastRegisterAt)}</td>
+            <td>
+              <button type="button" class="btn-mini" onclick="window.gbPickDevice(${item.id})">编辑</button>
+              <button type="button" class="btn-mini" onclick="window.gbLoadCatalog(${item.id})">目录</button>
+              <button type="button" class="btn-mini btn-danger" onclick="window.gbRemoveDevice(${item.id})">删除</button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderChannelTable(items) {
+      const tbody = document.getElementById("gbChannelTableBody");
+      if (!Array.isArray(items) || items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="table-empty">暂无通道。可先对设备执行“目录查询”。</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = items.map((item) => {
+        const status = String(item.status || "unknown");
+        const model = [item.manufacturer, item.model].filter(Boolean).join(" / ") || "-";
+        return `
+          <tr>
+            <td>${item.channelId || ""}</td>
+            <td>${item.name || ""}</td>
+            <td>${model}</td>
+            <td>${statusBadge(status, statusType(status))}</td>
+            <td><button type="button" class="btn-mini" onclick='window.gbUseChannel(${JSON.stringify(String(item.channelId || ""))})'>用于 INVITE</button></td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderSessionTable(items) {
+      const tbody = document.getElementById("gbSessionTableBody");
+      if (!Array.isArray(items) || items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="table-empty">暂无会话。</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = items.map((item) => {
+        const status = String(item.status || "unknown");
+        const canBye = status === "inviting" || status === "established";
+        const callId = String(item.callId || "");
+        const canBind = item.deviceId && item.channelId;
+        const canReinvite = status === "failed" || status === "terminated";
+        return `
+          <tr>
+            <td title="${callId}">${callId}</td>
+            <td>${item.deviceId || ""}</td>
+            <td>${item.channelId || ""}</td>
+            <td>${statusBadge(status, statusType(status))}</td>
+            <td>${formatTime(item.updatedAt)}</td>
+            <td>
+              <button type="button" class="btn-mini" onclick='window.gbExportSDP(${JSON.stringify(callId)})'>SDP</button>
+              ${canBind ? `<button type="button" class="btn-mini" onclick='window.gbBindCamera(${JSON.stringify(callId)})'>生成源</button>` : ""}
+              ${canReinvite ? `<button type="button" class="btn-mini btn-warning" onclick='window.gbReinvite(${JSON.stringify(callId)})'>重邀</button>` : ""}
+              ${canBye ? `<button type="button" class="btn-mini btn-danger" onclick='window.gbSendBye(${JSON.stringify(callId)})'>BYE</button>` : ""}
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    async function listDevices() {
+      const params = new URLSearchParams();
+      const keyword = val("gbKeyword");
+      const status = val("gbStatusFilter");
+      if (keyword) params.set("keyword", keyword);
+      if (status) params.set("status", status);
+      params.set("page", String(intVal("gbPage", 1)));
+      params.set("limit", String(intVal("gbLimit", 20)));
+      const resp = await requestJSON(`/api/v1/gb28181/devices?${params.toString()}`);
+      const data = (resp || {}).data || {};
+      state.devices = Array.isArray(data.data) ? data.data : [];
+      renderDeviceTable(state.devices);
+      showJSON("gbDeviceBox", resp);
+      return resp;
+    }
+
+    async function saveDevice() {
+      const payload = {
+        id: intVal("gbDeviceIdHidden", 0),
+        deviceId: val("gbDeviceId"),
+        name: val("gbDeviceName"),
+        authPassword: val("gbDeviceAuthPassword"),
+        transport: val("gbDeviceTransport"),
+        remoteAddr: val("gbDeviceRemoteAddr"),
+        enabled: boolVal("gbDeviceEnabled"),
+      };
+      const resp = await requestJSON("/api/v1/gb28181/devices/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const saved = (resp || {}).data || {};
+      fillDeviceForm(saved);
+      showJSON("gbDeviceBox", resp);
+      await listDevices();
+      return resp;
+    }
+
+    async function removeDeviceByIds(ids) {
+      if (!Array.isArray(ids) || ids.length === 0) return { code: 0, message: "skip" };
+      const resp = await requestJSON("/api/v1/gb28181/devices/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      showJSON("gbDeviceBox", resp);
+      await listDevices();
+      resetDeviceForm();
+      return resp;
+    }
+
+    async function loadChannels(deviceRowId) {
+      if (!deviceRowId) {
+        renderChannelTable([]);
+        return;
+      }
+      const resp = await requestJSON(`/api/v1/gb28181/devices/${deviceRowId}/channels?page=1&limit=300`);
+      const data = (resp || {}).data || {};
+      state.channels = Array.isArray(data.data) ? data.data : [];
+      renderChannelTable(state.channels);
+      showJSON("gbChannelBox", resp);
+      return resp;
+    }
+
+    async function queryCatalog(deviceRowId) {
+      const resp = await requestJSON(`/api/v1/gb28181/devices/${deviceRowId}/catalog/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      showJSON("gbChannelBox", resp);
+      await loadChannels(deviceRowId);
+      return resp;
+    }
+
+    async function sendInvite() {
+      const payload = {
+        deviceId: val("gbInviteDeviceId"),
+        channelId: val("gbInviteChannelId"),
+        mediaIp: val("gbInviteMediaIp"),
+        mediaPort: intVal("gbInviteMediaPort", 0),
+        ssrc: val("gbInviteSSRC"),
+        streamId: val("gbInviteStreamId"),
+      };
+      const resp = await requestJSON("/api/v1/gb28181/invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      showJSON("gbSessionBox", resp);
+      await listSessions();
+      return resp;
+    }
+
+    async function listSessions() {
+      const params = new URLSearchParams();
+      const status = val("gbSessionStatusFilter");
+      if (status) params.set("status", status);
+      params.set("limit", String(intVal("gbSessionLimit", 200)));
+      const resp = await requestJSON(`/api/v1/gb28181/sessions?${params.toString()}`);
+      const data = (resp || {}).data;
+      state.sessions = Array.isArray(data) ? data : [];
+      renderSessionTable(state.sessions);
+      showJSON("gbSessionBox", resp);
+      return resp;
+    }
+
+    async function sendBye(callId) {
+      const resp = await requestJSON("/api/v1/gb28181/bye", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callId }),
+      });
+      showJSON("gbSessionBox", resp);
+      await listSessions();
+      return resp;
+    }
+
+    async function reinvite(callId) {
+      const resp = await requestJSON(`/api/v1/gb28181/sessions/${encodeURIComponent(callId)}/reinvite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      showJSON("gbSessionBox", resp);
+      await listSessions();
+      return resp;
+    }
+
+    async function exportSessionSDP(callId) {
+      const resp = await requestJSON(`/api/v1/gb28181/sessions/${encodeURIComponent(callId)}/sdp`);
+      showJSON("gbSessionBox", resp);
+      const session = ((resp || {}).data || {}).session || {};
+      const path = session.sdpPath || "";
+      if (path) {
+        showToast(`SDP 已导出：${path}`, "success");
+      } else {
+        showToast("SDP 已导出", "success");
+      }
+      return resp;
+    }
+
+    async function bindCameraFromSession(callId) {
+      const applyPush = Boolean(getInput("gbApplyPushAfterBind").checked);
+      const resp = await requestJSON(`/api/v1/gb28181/sessions/${encodeURIComponent(callId)}/camera-source`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applyPush }),
+      });
+      showJSON("gbSessionBox", resp);
+      const camera = ((resp || {}).data || {}).camera || {};
+      if (camera.id) {
+        showToast(`已生成摄像头源 #${camera.id}（${camera.name || "GB28181"}）`, "success");
+      }
+      return resp;
+    }
+
+    window.gbPickDevice = async (id) => {
+      try {
+        const item = state.devices.find((row) => Number(row.id) === Number(id));
+        if (!item) return;
+        fillDeviceForm(item);
+        await loadChannels(Number(item.id));
+      } catch (error) {
+        showToast(error.message || String(error), "error");
+      }
+    };
+
+    window.gbLoadCatalog = async (id) => {
+      try {
+        const item = state.devices.find((row) => Number(row.id) === Number(id));
+        if (!item) return;
+        fillDeviceForm(item);
+        await queryCatalog(Number(id));
+        showToast(`已向设备 ${item.deviceId} 发送目录查询`, "info");
+      } catch (error) {
+        showToast(error.message || String(error), "error");
+      }
+    };
+
+    window.gbRemoveDevice = async (id) => {
+      try {
+        const item = state.devices.find((row) => Number(row.id) === Number(id));
+        const title = item ? (item.name || item.deviceId || id) : id;
+        const ok = await showConfirm("删除设备", `确认删除设备“${title}”？`);
+        if (!ok) return;
+        await removeDeviceByIds([Number(id)]);
+      } catch (error) {
+        showToast(error.message || String(error), "error");
+      }
+    };
+
+    window.gbUseChannel = (channelId) => {
+      getInput("gbInviteChannelId").value = String(channelId || "");
+      showToast(`已选择通道 ${channelId}`, "info");
+    };
+
+    window.gbSendBye = async (callId) => {
+      try {
+        const ok = await showConfirm("结束会话", `确认发送 BYE 结束会话 ${callId}？`);
+        if (!ok) return;
+        await sendBye(callId);
+      } catch (error) {
+        showToast(error.message || String(error), "error");
+      }
+    };
+
+    window.gbExportSDP = async (callId) => {
+      try {
+        await exportSessionSDP(callId);
+      } catch (error) {
+        showToast(error.message || String(error), "error");
+      }
+    };
+
+    window.gbBindCamera = async (callId) => {
+      try {
+        await bindCameraFromSession(callId);
+      } catch (error) {
+        showToast(error.message || String(error), "error");
+      }
+    };
+
+    window.gbReinvite = async (callId) => {
+      try {
+        await reinvite(callId);
+        showToast(`已发起重邀：${callId}`, "success");
+      } catch (error) {
+        showToast(error.message || String(error), "error");
+      }
+    };
+
+    bindAction("btnGBConfigLoad", loadConfig, "gbStatusBox", { successMessage: "配置已读取" });
+    bindAction("btnGBConfigSave", saveConfig, "gbStatusBox", { successMessage: "配置已保存" });
+    bindAction("btnGBStatus", refreshStatus, "gbStatusBox", { successMessage: "状态已刷新" });
+    bindAction("btnGBStart", async () => {
+      const resp = await requestJSON("/api/v1/gb28181/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      renderRuntimeStatus((resp || {}).data || {});
+      showJSON("gbStatusBox", resp);
+      return resp;
+    }, "gbStatusBox", { successMessage: "GB28181 服务已启动" });
+    bindAction("btnGBStop", async () => {
+      const resp = await requestJSON("/api/v1/gb28181/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      renderRuntimeStatus((resp || {}).data || {});
+      showJSON("gbStatusBox", resp);
+      return resp;
+    }, "gbStatusBox", { successMessage: "GB28181 服务已停止" });
+
+    bindAction("btnGBList", listDevices, "gbDeviceBox", { successMessage: "设备列表已刷新" });
+    bindAction("btnGBDeviceNew", async () => {
+      resetDeviceForm();
+      showJSON("gbDeviceBox", { code: 0, message: "new device draft" });
+      return { code: 0, message: "new device draft" };
+    }, "gbDeviceBox", { successMessage: "已切换到新建设备" });
+    bindAction("btnGBDeviceSave", saveDevice, "gbDeviceBox", { successMessage: "设备已保存" });
+    bindAction("btnGBDeviceDelete", async () => {
+      const id = intVal("gbDeviceIdHidden", 0);
+      if (!id) {
+        throw new Error("请先选择一个设备");
+      }
+      const ok = await showConfirm("删除设备", "确认删除当前设备？");
+      if (!ok) return { code: 0, message: "cancelled" };
+      return removeDeviceByIds([id]);
+    }, "gbDeviceBox", { successMessage: "设备已删除" });
+
+    bindAction("btnGBInvite", sendInvite, "gbSessionBox", { successMessage: "INVITE 已发送" });
+    bindAction("btnGBSessions", listSessions, "gbSessionBox", { successMessage: "会话列表已刷新" });
+
+    (async function boot() {
+      await loadConfig();
+      await refreshStatus();
+      await listDevices();
+      await listSessions();
+      resetDeviceForm();
+    })().catch((error) => {
+      showJSON("gbStatusBox", {
+        code: -1,
+        message: error.message || String(error),
+      });
+    });
+  </script>
+</body>
+</html>

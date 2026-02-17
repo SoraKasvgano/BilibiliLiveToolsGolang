@@ -22,7 +22,7 @@ func (s *Store) GetPushSetting(ctx context.Context) (*PushSetting, error) {
 		input_type, output_resolution, output_quality, output_bitrate_kbps, custom_output_params, custom_video_codec,
 		video_material_id, audio_material_id, is_mute, input_screen, input_audio_source,
 		input_audio_device_name, input_device_name, input_device_resolution, input_device_framerate,
-		input_device_plugins, rtsp_url, mjpeg_url, onvif_endpoint, onvif_username, onvif_password,
+		input_device_plugins, rtsp_url, mjpeg_url, rtmp_url, gb_pull_url, onvif_endpoint, onvif_username, onvif_password,
 		onvif_profile_token, multi_input_enabled, multi_input_layout, multi_input_urls, multi_input_meta, created_at, updated_at
 	FROM push_settings ORDER BY id DESC LIMIT 1`
 	row := s.db.QueryRowContext(ctx, q)
@@ -62,6 +62,8 @@ func (s *Store) GetPushSetting(ctx context.Context) (*PushSetting, error) {
 		&item.InputDevicePlugins,
 		&item.RTSPURL,
 		&item.MJPEGURL,
+		&item.RTMPURL,
+		&item.GBPullURL,
 		&item.ONVIFEndpoint,
 		&item.ONVIFUsername,
 		&item.ONVIFPassword,
@@ -108,7 +110,7 @@ func (s *Store) UpdatePushSetting(ctx context.Context, req PushSettingUpdateRequ
 		if !strings.Contains(req.FFmpegCommand, "{URL}") {
 			return nil, errors.New("ffmpeg command must include {URL}")
 		}
-		if isLikelyUSBTemplateCommand(req.FFmpegCommand) && (inputType == InputTypeRTSP || inputType == InputTypeMJPEG || inputType == InputTypeONVIF) {
+		if isLikelyUSBTemplateCommand(req.FFmpegCommand) && (inputType == InputTypeRTSP || inputType == InputTypeMJPEG || inputType == InputTypeONVIF || inputType == InputTypeRTMP || inputType == InputTypeGB28181) {
 			return nil, errors.New("advanced ffmpeg command looks like USB camera template; switch to normal mode or replace command for current input type")
 		}
 	}
@@ -187,6 +189,8 @@ func (s *Store) UpdatePushSetting(ctx context.Context, req PushSettingUpdateRequ
 		input_device_plugins = ?,
 		rtsp_url = ?,
 		mjpeg_url = ?,
+		rtmp_url = ?,
+		gb_pull_url = ?,
 		onvif_endpoint = ?,
 		onvif_username = ?,
 		onvif_password = ?,
@@ -219,6 +223,8 @@ func (s *Store) UpdatePushSetting(ctx context.Context, req PushSettingUpdateRequ
 		req.InputDevicePlugins,
 		normalizeInputURL(req.RTSPURL),
 		normalizeInputURL(req.MJPEGURL),
+		normalizeInputURL(req.RTMPURL),
+		normalizeInputURL(req.GBPullURL),
 		normalizeInputURL(req.ONVIFEndpoint),
 		strings.TrimSpace(req.ONVIFUsername),
 		strings.TrimSpace(req.ONVIFPassword),
@@ -1378,9 +1384,9 @@ func (s *Store) ListCameraSources(ctx context.Context, req CameraSourceListReque
 	args := make([]any, 0, 4)
 	keyword := strings.TrimSpace(req.Keyword)
 	if keyword != "" {
-		filter += ` AND (name LIKE ? OR rtsp_url LIKE ? OR mjpeg_url LIKE ? OR onvif_endpoint LIKE ? OR usb_device_name LIKE ?)`
+		filter += ` AND (name LIKE ? OR rtsp_url LIKE ? OR mjpeg_url LIKE ? OR rtmp_url LIKE ? OR gb_pull_url LIKE ? OR gb_device_id LIKE ? OR gb_channel_id LIKE ? OR gb_server LIKE ? OR onvif_endpoint LIKE ? OR usb_device_name LIKE ?)`
 		likeValue := "%" + keyword + "%"
-		args = append(args, likeValue, likeValue, likeValue, likeValue, likeValue)
+		args = append(args, likeValue, likeValue, likeValue, likeValue, likeValue, likeValue, likeValue, likeValue, likeValue, likeValue)
 	}
 	sourceType := NormalizeCameraSourceType(req.SourceType)
 	if sourceType != "" {
@@ -1395,7 +1401,7 @@ func (s *Store) ListCameraSources(ctx context.Context, req CameraSourceListReque
 
 	offset := (req.Page - 1) * req.Limit
 	query := `SELECT
-		id, name, source_type, rtsp_url, mjpeg_url,
+		id, name, source_type, rtsp_url, mjpeg_url, rtmp_url, gb_pull_url, gb_device_id, gb_channel_id, gb_server, gb_transport,
 		onvif_endpoint, onvif_username, onvif_password, onvif_profile_token,
 		usb_device_name, usb_device_resolution, usb_device_framerate,
 		description, enabled, created_at, updated_at
@@ -1432,11 +1438,33 @@ func (s *Store) GetCameraSourceByID(ctx context.Context, id int64) (*CameraSourc
 		return nil, errors.New("camera source id must be greater than zero")
 	}
 	row := s.db.QueryRowContext(ctx, `SELECT
-		id, name, source_type, rtsp_url, mjpeg_url,
+		id, name, source_type, rtsp_url, mjpeg_url, rtmp_url, gb_pull_url, gb_device_id, gb_channel_id, gb_server, gb_transport,
 		onvif_endpoint, onvif_username, onvif_password, onvif_profile_token,
 		usb_device_name, usb_device_resolution, usb_device_framerate,
 		description, enabled, created_at, updated_at
 	FROM camera_sources WHERE id=?`, id)
+	return scanCameraSource(row)
+}
+
+func (s *Store) FindCameraSourceByGBIdentity(ctx context.Context, deviceID string, channelID string) (*CameraSource, error) {
+	deviceID = strings.TrimSpace(deviceID)
+	channelID = strings.TrimSpace(channelID)
+	if deviceID == "" || channelID == "" {
+		return nil, errors.New("gb deviceId and channelId are required")
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT
+		id, name, source_type, rtsp_url, mjpeg_url, rtmp_url, gb_pull_url, gb_device_id, gb_channel_id, gb_server, gb_transport,
+		onvif_endpoint, onvif_username, onvif_password, onvif_profile_token,
+		usb_device_name, usb_device_resolution, usb_device_framerate,
+		description, enabled, created_at, updated_at
+	FROM camera_sources
+	WHERE source_type=? AND gb_device_id=? AND gb_channel_id=?
+	ORDER BY updated_at DESC, id DESC
+	LIMIT 1`,
+		CameraSourceTypeGB28181,
+		deviceID,
+		channelID,
+	)
 	return scanCameraSource(row)
 }
 
@@ -1456,6 +1484,12 @@ func (s *Store) SaveCameraSource(ctx context.Context, req CameraSourceSaveReques
 			source_type = ?,
 			rtsp_url = ?,
 			mjpeg_url = ?,
+			rtmp_url = ?,
+			gb_pull_url = ?,
+			gb_device_id = ?,
+			gb_channel_id = ?,
+			gb_server = ?,
+			gb_transport = ?,
 			onvif_endpoint = ?,
 			onvif_username = ?,
 			onvif_password = ?,
@@ -1471,6 +1505,12 @@ func (s *Store) SaveCameraSource(ctx context.Context, req CameraSourceSaveReques
 			item.SourceType,
 			item.RTSPURL,
 			item.MJPEGURL,
+			item.RTMPURL,
+			item.GBPullURL,
+			item.GBDeviceID,
+			item.GBChannelID,
+			item.GBServer,
+			item.GBTransport,
 			item.ONVIFEndpoint,
 			item.ONVIFUsername,
 			item.ONVIFPassword,
@@ -1490,13 +1530,20 @@ func (s *Store) SaveCameraSource(ctx context.Context, req CameraSourceSaveReques
 	}
 
 	result, err := s.db.ExecContext(ctx, `INSERT INTO camera_sources (
-		name, source_type, rtsp_url, mjpeg_url, onvif_endpoint, onvif_username, onvif_password, onvif_profile_token,
+		name, source_type, rtsp_url, mjpeg_url, rtmp_url, gb_pull_url, gb_device_id, gb_channel_id, gb_server, gb_transport,
+		onvif_endpoint, onvif_username, onvif_password, onvif_profile_token,
 		usb_device_name, usb_device_resolution, usb_device_framerate, description, enabled, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		item.Name,
 		item.SourceType,
 		item.RTSPURL,
 		item.MJPEGURL,
+		item.RTMPURL,
+		item.GBPullURL,
+		item.GBDeviceID,
+		item.GBChannelID,
+		item.GBServer,
+		item.GBTransport,
 		item.ONVIFEndpoint,
 		item.ONVIFUsername,
 		item.ONVIFPassword,
@@ -1555,6 +1602,12 @@ func scanCameraSource(scanner interface {
 		&item.SourceType,
 		&item.RTSPURL,
 		&item.MJPEGURL,
+		&item.RTMPURL,
+		&item.GBPullURL,
+		&item.GBDeviceID,
+		&item.GBChannelID,
+		&item.GBServer,
+		&item.GBTransport,
 		&item.ONVIFEndpoint,
 		&item.ONVIFUsername,
 		&item.ONVIFPassword,
@@ -1586,6 +1639,12 @@ func sanitizeCameraSourceForWrite(req CameraSourceSaveRequest) (*CameraSource, e
 		SourceType:          sourceType,
 		RTSPURL:             normalizeInputURL(req.RTSPURL),
 		MJPEGURL:            normalizeInputURL(req.MJPEGURL),
+		RTMPURL:             normalizeInputURL(req.RTMPURL),
+		GBPullURL:           normalizeInputURL(req.GBPullURL),
+		GBDeviceID:          strings.TrimSpace(req.GBDeviceID),
+		GBChannelID:         strings.TrimSpace(req.GBChannelID),
+		GBServer:            strings.TrimSpace(req.GBServer),
+		GBTransport:         strings.TrimSpace(req.GBTransport),
 		ONVIFEndpoint:       normalizeInputURL(req.ONVIFEndpoint),
 		ONVIFUsername:       strings.TrimSpace(req.ONVIFUsername),
 		ONVIFPassword:       strings.TrimSpace(req.ONVIFPassword),
@@ -1605,6 +1664,9 @@ func sanitizeCameraSourceForWrite(req CameraSourceSaveRequest) (*CameraSource, e
 	if item.USBDeviceFramerate <= 0 {
 		item.USBDeviceFramerate = 30
 	}
+	if item.GBTransport == "" {
+		item.GBTransport = "udp"
+	}
 
 	switch sourceType {
 	case CameraSourceTypeRTSP:
@@ -1623,6 +1685,14 @@ func sanitizeCameraSourceForWrite(req CameraSourceSaveRequest) (*CameraSource, e
 		if item.USBDeviceName == "" {
 			return nil, errors.New("usb device name is required")
 		}
+	case CameraSourceTypeRTMP:
+		if item.RTMPURL == "" {
+			return nil, errors.New("rtmp url is required")
+		}
+	case CameraSourceTypeGB28181:
+		if item.GBPullURL == "" {
+			return nil, errors.New("gb28181 pull url is required (usually rtsp/http-flv from media server)")
+		}
 	}
 	return item, nil
 }
@@ -1640,6 +1710,10 @@ func buildDefaultCameraName(item *CameraSource) string {
 		return "ONVIF Camera"
 	case CameraSourceTypeUSB:
 		return "USB Camera"
+	case CameraSourceTypeRTMP:
+		return "RTMP Source"
+	case CameraSourceTypeGB28181:
+		return "GB28181 Device"
 	default:
 		return "Camera"
 	}

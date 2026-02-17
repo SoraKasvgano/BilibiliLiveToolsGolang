@@ -116,6 +116,12 @@ function recommendedAdvancedCommand(inputType) {
   if (type === "mjpeg") {
     return "ffmpeg -f mjpeg -i \"http://ip:port/mjpeg\" -an " + commonOut;
   }
+  if (type === "rtmp") {
+    return "ffmpeg -i \"rtmp://ip/app/stream\" -an " + commonOut;
+  }
+  if (type === "gb28181") {
+    return "ffmpeg -i \"rtsp://media-server/live/340200...\" -an " + commonOut;
+  }
   if (type === "usb_camera" || type === "usb_camera_plus") {
     return "ffmpeg -f dshow -video_size 1280x720 -framerate 30 -i video=\"HD Pro Webcam C920\" -an " + commonOut;
   }
@@ -133,7 +139,7 @@ function suggestPushAdvancedCommand() {
     commandEl.value = recommendedAdvancedCommand(inputType);
     return;
   }
-  const networkType = inputType === "rtsp" || inputType === "mjpeg" || inputType === "onvif";
+  const networkType = inputType === "rtsp" || inputType === "mjpeg" || inputType === "onvif" || inputType === "rtmp" || inputType === "gb28181";
   if (networkType && isUsbTemplateCommand(current)) {
     commandEl.value = recommendedAdvancedCommand(inputType);
   }
@@ -309,6 +315,8 @@ function resolveCameraSourceURL(item = {}) {
   const type = String(item.sourceType || "").toLowerCase().trim();
   if (type === "rtsp" || type === "onvif") return String(item.rtspUrl || "").trim();
   if (type === "mjpeg") return String(item.mjpegUrl || "").trim();
+  if (type === "rtmp") return String(item.rtmpUrl || "").trim();
+  if (type === "gb28181") return String(item.gbPullUrl || "").trim();
   return "";
 }
 
@@ -316,6 +324,8 @@ function cameraSourceTypeLabel(type) {
   const normalized = String(type || "").toLowerCase().trim();
   if (normalized === "rtsp") return "RTSP";
   if (normalized === "mjpeg") return "MJPEG";
+  if (normalized === "rtmp") return "RTMP";
+  if (normalized === "gb28181") return "GB28181";
   if (normalized === "onvif") return "ONVIF";
   if (normalized === "usb") return "USB";
   return normalized || "unknown";
@@ -587,6 +597,8 @@ async function refreshPush() {
   applyPushBitrateValue(data.outputBitrateKbps || 0);
   document.getElementById("pushRtspUrl").value = data.rtspUrl || "";
   document.getElementById("pushMjpegUrl").value = data.mjpegUrl || "";
+  document.getElementById("pushRtmpUrl").value = data.rtmpUrl || "";
+  document.getElementById("pushGbPullUrl").value = data.gbPullUrl || "";
   document.getElementById("pushMultiEnabled").value = data.multiInputEnabled ? "true" : "false";
   document.getElementById("pushMultiLayout").value = data.multiInputLayout || "2x2";
   const loadedMeta = Array.isArray(data.multiInputMeta) ? data.multiInputMeta : [];
@@ -980,6 +992,8 @@ function buildPushPayload() {
     outputBitrateKbps: currentPushBitrateKbps(),
     rtspUrl: asString("pushRtspUrl"),
     mjpegUrl: asString("pushMjpegUrl"),
+    rtmpUrl: asString("pushRtmpUrl"),
+    gbPullUrl: asString("pushGbPullUrl"),
     multiInputEnabled: asString("pushMultiEnabled") === "true",
     multiInputLayout: asString("pushMultiLayout"),
     multiInputUrls: mosaic.urls,
@@ -1379,12 +1393,19 @@ function bindActions() {
       username: asString("ptzUsername"),
       password: document.getElementById("ptzPassword").value || "",
       profileToken: asString("ptzProfileToken"),
+      presetToken: asString("ptzPresetToken"),
       action: asString("ptzAction"),
       speed: Number(document.getElementById("ptzSpeed").value || 0.3),
-      durationMs: 700,
+      durationMs: asNumber("ptzDurationMs", 700),
+      pan: Number(document.getElementById("ptzPan").value || 0),
+      tilt: Number(document.getElementById("ptzTilt").value || 0),
+      zoom: Number(document.getElementById("ptzZoom").value || 0),
     };
     const result = await apiPost("/api/v1/ptz/command", payload);
     setBox("integrationBox", result);
+    if (result && result.data && result.data.presetToken) {
+      document.getElementById("ptzPresetToken").value = result.data.presetToken;
+    }
   });
   document.getElementById("btnBotCommand").onclick = withError("integrationBox", async () => {
     const payload = {

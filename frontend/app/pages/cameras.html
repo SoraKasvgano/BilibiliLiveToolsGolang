@@ -63,6 +63,8 @@
           <select id="cameraType">
             <option value="rtsp">RTSP</option>
             <option value="mjpeg">MJPEG</option>
+            <option value="rtmp">RTMP</option>
+            <option value="gb28181">GB28181</option>
             <option value="onvif">ONVIF</option>
             <option value="usb">USB 摄像头</option>
           </select>
@@ -92,6 +94,39 @@
         <label>MJPEG 地址
           <input id="cameraMjpegUrl" placeholder="http://ip:port/mjpeg" />
         </label>
+      </div>
+
+      <div id="panelRTMP" class="soft-panel panel-hidden">
+        <h3>RTMP 配置</h3>
+        <label>RTMP 地址
+          <input id="cameraRtmpUrl" placeholder="rtmp://ip/app/stream" />
+        </label>
+      </div>
+
+      <div id="panelGB28181" class="soft-panel panel-hidden">
+        <h3>GB28181 设备配置</h3>
+        <label>拉流地址（必填）
+          <input id="cameraGbPullUrl" placeholder="rtsp://zlm/live/340200... 或 http://.../live.flv" />
+        </label>
+        <div class="grid two">
+          <label>设备 ID（可选）
+            <input id="cameraGbDeviceId" placeholder="34020000001320000001" />
+          </label>
+          <label>通道 ID（可选）
+            <input id="cameraGbChannelId" placeholder="34020000001310000001" />
+          </label>
+        </div>
+        <div class="grid two">
+          <label>平台地址（可选）
+            <input id="cameraGbServer" placeholder="192.168.1.100:5060" />
+          </label>
+          <label>传输协议
+            <select id="cameraGbTransport">
+              <option value="udp">UDP</option>
+              <option value="tcp">TCP</option>
+            </select>
+          </label>
+        </div>
       </div>
 
       <div id="panelONVIF" class="soft-panel panel-hidden">
@@ -173,6 +208,8 @@
             <option value="">全部</option>
             <option value="rtsp">RTSP</option>
             <option value="mjpeg">MJPEG</option>
+            <option value="rtmp">RTMP</option>
+            <option value="gb28181">GB28181</option>
             <option value="onvif">ONVIF</option>
             <option value="usb">USB</option>
           </select>
@@ -218,6 +255,8 @@
     let cameraPreviewRunning = false;
     let editingCameraId = 0;
     let flashCameraId = 0;
+    let onvifAutoProbeTimer = null;
+    let onvifLastProbeKey = "";
 
     function boolValue(id) {
       return String(document.getElementById(id).value || "").toLowerCase() === "true";
@@ -242,6 +281,8 @@
       const type = sourceTypeOf(item);
       if (type === "rtsp" || type === "onvif") return item.rtspUrl || item.onvifEndpoint || "";
       if (type === "mjpeg") return item.mjpegUrl || "";
+      if (type === "rtmp") return item.rtmpUrl || "";
+      if (type === "gb28181") return item.gbPullUrl || item.gbDeviceId || "";
       if (type === "usb") return item.usbDeviceName || "";
       return "";
     }
@@ -250,8 +291,13 @@
       const type = textValue("cameraType");
       setPanelVisible("panelRTSP", type === "rtsp");
       setPanelVisible("panelMJPEG", type === "mjpeg");
+      setPanelVisible("panelRTMP", type === "rtmp");
+      setPanelVisible("panelGB28181", type === "gb28181");
       setPanelVisible("panelONVIF", type === "onvif");
       setPanelVisible("panelUSB", type === "usb");
+      if (type === "onvif") {
+        scheduleOnvifAutoProbe();
+      }
     }
 
     function fillForm(item) {
@@ -264,11 +310,19 @@
       document.getElementById("cameraDescription").value = data.description || "";
       document.getElementById("cameraRtspUrl").value = data.rtspUrl || "";
       document.getElementById("cameraMjpegUrl").value = data.mjpegUrl || "";
+      document.getElementById("cameraRtmpUrl").value = data.rtmpUrl || "";
+      document.getElementById("cameraGbPullUrl").value = data.gbPullUrl || "";
+      document.getElementById("cameraGbDeviceId").value = data.gbDeviceId || "";
+      document.getElementById("cameraGbChannelId").value = data.gbChannelId || "";
+      document.getElementById("cameraGbServer").value = data.gbServer || "";
+      document.getElementById("cameraGbTransport").value = data.gbTransport || "udp";
       document.getElementById("cameraOnvifEndpoint").value = data.onvifEndpoint || "";
       document.getElementById("cameraOnvifUsername").value = data.onvifUsername || "";
       document.getElementById("cameraOnvifPassword").value = data.onvifPassword || "";
       document.getElementById("cameraOnvifProfileToken").value = data.onvifProfileToken || "";
-      document.getElementById("cameraOnvifRtspUrl").value = data.rtspUrl || "";
+      const onvifRtspInput = document.getElementById("cameraOnvifRtspUrl");
+      onvifRtspInput.value = data.rtspUrl || "";
+      onvifRtspInput.dataset.autoFilled = "0";
       document.getElementById("cameraUsbName").value = data.usbDeviceName || "";
       document.getElementById("cameraUsbResolution").value = data.usbDeviceResolution || "1280x720";
       document.getElementById("cameraUsbFps").value = String(data.usbDeviceFramerate || 30);
@@ -287,6 +341,12 @@
         description: textValue("cameraDescription"),
         rtspUrl: textValue("cameraType") === "onvif" ? textValue("cameraOnvifRtspUrl") : textValue("cameraRtspUrl"),
         mjpegUrl: textValue("cameraMjpegUrl"),
+        rtmpUrl: textValue("cameraRtmpUrl"),
+        gbPullUrl: textValue("cameraGbPullUrl"),
+        gbDeviceId: textValue("cameraGbDeviceId"),
+        gbChannelId: textValue("cameraGbChannelId"),
+        gbServer: textValue("cameraGbServer"),
+        gbTransport: textValue("cameraGbTransport") || "udp",
         onvifEndpoint: textValue("cameraOnvifEndpoint"),
         onvifUsername: textValue("cameraOnvifUsername"),
         onvifPassword: document.getElementById("cameraOnvifPassword").value || "",
@@ -487,23 +547,91 @@
       setStepState(1, true);
     }
 
-    async function probeOnvifProfiles() {
+    function pickOnvifProfile(items, preferredToken) {
+      if (!Array.isArray(items) || items.length === 0) return null;
+      const token = String(preferredToken || "").trim();
+      if (token) {
+        const matched = items.find((item) => String((item && item.token) || "").trim() === token);
+        if (matched) return matched;
+      }
+      const preferred = items.find((item) => Boolean(item && item.preferred));
+      if (preferred) return preferred;
+      const withRTSP = items.find((item) => String((item && item.rtspUrl) || "").trim() !== "");
+      if (withRTSP) return withRTSP;
+      return items[0];
+    }
+
+    function applyOnvifProfileResult(items) {
+      if (!Array.isArray(items) || items.length === 0) return;
+      const tokenInput = document.getElementById("cameraOnvifProfileToken");
+      const rtspInput = document.getElementById("cameraOnvifRtspUrl");
+      let changedToken = false;
+      if (!textValue("cameraOnvifProfileToken")) {
+        const first = pickOnvifProfile(items, "");
+        const token = String((first && first.token) || "").trim();
+        if (token) {
+          tokenInput.value = token;
+          changedToken = true;
+        }
+      }
+      const selected = pickOnvifProfile(items, tokenInput.value || "");
+      let candidateRTSP = String((selected && selected.rtspUrl) || "").trim();
+      if (!candidateRTSP) {
+        const fallback = pickOnvifProfile(items, "");
+        candidateRTSP = String((fallback && fallback.rtspUrl) || "").trim();
+      }
+      if (!candidateRTSP) return;
+      const current = textValue("cameraOnvifRtspUrl");
+      const autoFilled = rtspInput.dataset.autoFilled === "1";
+      if (!current || autoFilled) {
+        rtspInput.value = candidateRTSP;
+        rtspInput.dataset.autoFilled = "1";
+        if (changedToken) {
+          markFields(["cameraOnvifProfileToken", "cameraOnvifRtspUrl"]);
+        } else {
+          markFields(["cameraOnvifRtspUrl"]);
+        }
+      }
+    }
+
+    function scheduleOnvifAutoProbe() {
+      if (textValue("cameraType") !== "onvif") return;
+      const endpoint = textValue("cameraOnvifEndpoint");
+      if (!endpoint) return;
+      if (onvifAutoProbeTimer) {
+        clearTimeout(onvifAutoProbeTimer);
+      }
+      onvifAutoProbeTimer = setTimeout(() => {
+        probeOnvifProfiles(true).catch(() => {});
+      }, 500);
+    }
+
+    async function probeOnvifProfiles(silent) {
       const payload = {
         endpoint: textValue("cameraOnvifEndpoint"),
         username: textValue("cameraOnvifUsername"),
         password: document.getElementById("cameraOnvifPassword").value || ""
       };
-      if (!payload.endpoint) throw new Error("请先填写 ONVIF Endpoint");
+      if (!payload.endpoint) {
+        if (silent) return { code: 0, message: "skip-empty-endpoint", data: [] };
+        throw new Error("请先填写 ONVIF Endpoint");
+      }
+      const probeKey = `${payload.endpoint}@@${payload.username}@@${payload.password}`;
+      if (silent && probeKey === onvifLastProbeKey) {
+        return { code: 0, message: "skip-unchanged-credentials", data: [] };
+      }
       const result = await requestJSON("/api/v1/ptz/profiles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      showJSON("cameraBox", result);
-      const items = (result && result.data) || [];
-      if (Array.isArray(items) && items.length > 0 && !textValue("cameraOnvifProfileToken")) {
-        document.getElementById("cameraOnvifProfileToken").value = items[0].token || "";
+      onvifLastProbeKey = probeKey;
+      if (!silent) {
+        showJSON("cameraBox", result);
       }
+      const items = (result && result.data) || [];
+      applyOnvifProfileResult(items);
+      return result;
     }
 
     async function discoverUsb() {
@@ -524,6 +652,15 @@
     }
 
     document.getElementById("cameraType").onchange = switchTypePanels;
+    document.getElementById("cameraOnvifEndpoint").onchange = scheduleOnvifAutoProbe;
+    document.getElementById("cameraOnvifUsername").onchange = scheduleOnvifAutoProbe;
+    document.getElementById("cameraOnvifPassword").onchange = scheduleOnvifAutoProbe;
+    document.getElementById("cameraOnvifEndpoint").oninput = scheduleOnvifAutoProbe;
+    document.getElementById("cameraOnvifUsername").oninput = scheduleOnvifAutoProbe;
+    document.getElementById("cameraOnvifPassword").oninput = scheduleOnvifAutoProbe;
+    document.getElementById("cameraOnvifRtspUrl").oninput = () => {
+      document.getElementById("cameraOnvifRtspUrl").dataset.autoFilled = "0";
+    };
     document.getElementById("discoveredOnvifList").onchange = () => {
       const endpoint = textValue("discoveredOnvifList");
       if (!endpoint) return;
@@ -533,6 +670,7 @@
         document.getElementById("cameraName").value = "ONVIF Camera";
       }
       switchTypePanels();
+      scheduleOnvifAutoProbe();
     };
     document.getElementById("discoveredUsbList").onchange = () => {
       const deviceName = textValue("discoveredUsbList");

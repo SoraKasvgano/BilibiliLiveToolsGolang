@@ -16,7 +16,10 @@ Go rewrite of BilibiliLiveTools (backend + frontend), focused on Bilibili live s
 ## 2. 当前主要能力
 
 - 推流输入：视频、USB 摄像头、RTSP、MJPEG、桌面、ONVIF（PTZ联动）。
-- 摄像头资产库：支持 RTSP/MJPEG/ONVIF/USB 统一管理，ONVIF 每台设备可独立用户名/密码（明文存储）。
+- 摄像头资产库：支持 RTSP/MJPEG/ONVIF/USB 统一管理，ONVIF 每台设备可独立用户名/密码（明文存储），并可自动探测并回填 RTSP 地址。
+- GB28181 平台接入：支持 SIP 注册、Digest 鉴权、Keepalive、Catalog 目录、INVITE/BYE、会话落库与状态维护（含 ACK、会话超时兜底、重邀）。
+- GB28181 推流接入桥：支持按会话导出 SDP 到本地文件，并一键生成/更新 `gb28181` 摄像头源（可选自动套用推流配置）。
+- GB28181 端口池：支持媒体端口池（start/end）分配，降低多路并发冲突概率。
 - Bilibili 能力：登录状态、二维码登录、Cookie 刷新、开播/关播、房间信息管理。
 - Bilibili 错误容错：重试、错误分级、完整响应落库、索引/详情查询。
 - 集成能力：Webhook / Bot 异步任务队列（持久化重试、死信、限流）、弹幕规则调度。
@@ -73,6 +76,7 @@ go run .
 - 若以弹窗方式打开 `app/pages/login.html?autoclose=1`，扫码成功后会自动通知主页面并尝试自动关闭弹窗。
 - 迁移版页面：
   - `http://127.0.0.1:18686/app/pages/cameras.html`
+  - `http://127.0.0.1:18686/app/pages/gb28181.html`
   - `http://127.0.0.1:18686/app/pages/push.html`
   - `http://127.0.0.1:18686/app/pages/room.html`
   - `http://127.0.0.1:18686/app/pages/material.html`
@@ -242,6 +246,14 @@ docker compose up -d --build
 - 推流状态：`GET /api/v1/push/status`
 - 摄像头库：`GET /api/v1/cameras`、`GET /api/v1/cameras/{id}`、`POST /api/v1/cameras/save|delete`
 - 摄像头一键套用推流：`POST /api/v1/cameras/{id}/apply-push`
+- GB28181 配置与运行：`GET/POST /api/v1/gb28181/config`、`GET /api/v1/gb28181/status`、`POST /api/v1/gb28181/start|stop`
+- GB28181 设备与目录：`GET /api/v1/gb28181/devices`、`GET /api/v1/gb28181/devices/{id}`、`POST /api/v1/gb28181/devices/save|delete`、`POST /api/v1/gb28181/devices/{id}/catalog/query`
+- GB28181 会话：`POST /api/v1/gb28181/invite`、`POST /api/v1/gb28181/bye`、`GET /api/v1/gb28181/sessions`
+- GB28181 会话导出/入库：
+  - `GET /api/v1/gb28181/sessions/{callId}/sdp`
+  - `POST /api/v1/gb28181/sessions/{callId}/camera-source`
+- GB28181 会话重邀：
+  - `POST /api/v1/gb28181/sessions/{callId}/reinvite`
 - ONVIF 发现：`GET /api/v1/ptz/discover`
 - B站错误日志：`GET /api/v1/integration/bilibili/error-logs`
 - 弹幕消费器配置：`GET/POST /api/v1/integration/danmaku/consumer/setting`

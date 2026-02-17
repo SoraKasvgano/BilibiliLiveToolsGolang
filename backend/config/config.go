@@ -10,23 +10,37 @@ import (
 
 // Config holds runtime options for the Go rewrite service.
 type Config struct {
-	ListenAddr      string `json:"listenAddr"`
-	DataDir         string `json:"dataDir"`
-	DBPath          string `json:"dbPath"`
-	MediaDir        string `json:"mediaDir"`
-	FFmpegPath      string `json:"ffmpegPath"`
-	FFprobePath     string `json:"ffprobePath"`
-	LogBufferSize   int    `json:"logBufferSize"`
-	APIBase         string `json:"apiBase"`
-	AllowOrigin     string `json:"allowOrigin"`
-	DebugMode       bool   `json:"debugMode"`
-	EnableDebugLogs bool   `json:"enableDebugLogs"`
-	BiliAppKey      string `json:"biliAppKey"`
-	BiliAppSecret   string `json:"biliAppSecret"`
-	BiliPlatform    string `json:"biliPlatform"`
-	BiliVersion     string `json:"biliVersion"`
-	BiliBuild       string `json:"biliBuild"`
-	ConfigFile      string `json:"configFile"`
+	ListenAddr               string `json:"listenAddr"`
+	DataDir                  string `json:"dataDir"`
+	DBPath                   string `json:"dbPath"`
+	MediaDir                 string `json:"mediaDir"`
+	FFmpegPath               string `json:"ffmpegPath"`
+	FFprobePath              string `json:"ffprobePath"`
+	LogBufferSize            int    `json:"logBufferSize"`
+	APIBase                  string `json:"apiBase"`
+	AllowOrigin              string `json:"allowOrigin"`
+	DebugMode                bool   `json:"debugMode"`
+	EnableDebugLogs          bool   `json:"enableDebugLogs"`
+	BiliAppKey               string `json:"biliAppKey"`
+	BiliAppSecret            string `json:"biliAppSecret"`
+	BiliPlatform             string `json:"biliPlatform"`
+	BiliVersion              string `json:"biliVersion"`
+	BiliBuild                string `json:"biliBuild"`
+	GB28181Enabled           bool   `json:"gb28181Enabled"`
+	GB28181ListenIP          string `json:"gb28181ListenIp"`
+	GB28181ListenPort        int    `json:"gb28181ListenPort"`
+	GB28181Transport         string `json:"gb28181Transport"`
+	GB28181ServerID          string `json:"gb28181ServerId"`
+	GB28181Realm             string `json:"gb28181Realm"`
+	GB28181Password          string `json:"gb28181Password"`
+	GB28181RegisterExpires   int    `json:"gb28181RegisterExpires"`
+	GB28181HeartbeatInterval int    `json:"gb28181HeartbeatInterval"`
+	GB28181MediaIP           string `json:"gb28181MediaIp"`
+	GB28181MediaPort         int    `json:"gb28181MediaPort"`
+	GB28181MediaPortStart    int    `json:"gb28181MediaPortStart"`
+	GB28181MediaPortEnd      int    `json:"gb28181MediaPortEnd"`
+	GB28181AckTimeoutSec     int    `json:"gb28181AckTimeoutSec"`
+	ConfigFile               string `json:"configFile"`
 }
 
 func resolveConfigFilePath() (string, error) {
@@ -194,21 +208,35 @@ func envIntOrDefault(key string, fallback int) int {
 func defaultConfig(configFile string) Config {
 	baseDir := filepath.Dir(configFile)
 	cfg := Config{
-		ListenAddr:      envOrDefault("GOVER_LISTEN", ":18686"),
-		DataDir:         envOrDefault("GOVER_DATA_DIR", baseDir),
-		FFmpegPath:      envOrDefault("GOVER_FFMPEG_PATH", defaultFFmpegPathByOS()),
-		FFprobePath:     envOrDefault("GOVER_FFPROBE_PATH", defaultFFprobePathByOS()),
-		LogBufferSize:   envIntOrDefault("GOVER_LOG_BUFFER_SIZE", 300),
-		APIBase:         envOrDefault("GOVER_API_BASE", "/api/v1"),
-		AllowOrigin:     envOrDefault("GOVER_ALLOW_ORIGIN", "*"),
-		DebugMode:       strings.EqualFold(envOrDefault("GOVER_DEBUG", "false"), "true"),
-		EnableDebugLogs: strings.EqualFold(envOrDefault("GOVER_DEBUG", "false"), "true"),
-		BiliAppKey:      envOrDefault("GOVER_BILI_APP_KEY", "aae92bc66f3edfab"),
-		BiliAppSecret:   envOrDefault("GOVER_BILI_APP_SECRET", "af125a0d5279fd576c1b4418a3e8276d"),
-		BiliPlatform:    envOrDefault("GOVER_BILI_PLATFORM", "pc_link"),
-		BiliVersion:     envOrDefault("GOVER_BILI_VERSION", "7.20.0.9482"),
-		BiliBuild:       envOrDefault("GOVER_BILI_BUILD", "9482"),
-		ConfigFile:      configFile,
+		ListenAddr:               envOrDefault("GOVER_LISTEN", ":18686"),
+		DataDir:                  envOrDefault("GOVER_DATA_DIR", baseDir),
+		FFmpegPath:               envOrDefault("GOVER_FFMPEG_PATH", defaultFFmpegPathByOS()),
+		FFprobePath:              envOrDefault("GOVER_FFPROBE_PATH", defaultFFprobePathByOS()),
+		LogBufferSize:            envIntOrDefault("GOVER_LOG_BUFFER_SIZE", 300),
+		APIBase:                  envOrDefault("GOVER_API_BASE", "/api/v1"),
+		AllowOrigin:              envOrDefault("GOVER_ALLOW_ORIGIN", "*"),
+		DebugMode:                strings.EqualFold(envOrDefault("GOVER_DEBUG", "false"), "true"),
+		EnableDebugLogs:          strings.EqualFold(envOrDefault("GOVER_DEBUG", "false"), "true"),
+		BiliAppKey:               envOrDefault("GOVER_BILI_APP_KEY", "aae92bc66f3edfab"),
+		BiliAppSecret:            envOrDefault("GOVER_BILI_APP_SECRET", "af125a0d5279fd576c1b4418a3e8276d"),
+		BiliPlatform:             envOrDefault("GOVER_BILI_PLATFORM", "pc_link"),
+		BiliVersion:              envOrDefault("GOVER_BILI_VERSION", "7.20.0.9482"),
+		BiliBuild:                envOrDefault("GOVER_BILI_BUILD", "9482"),
+		GB28181Enabled:           strings.EqualFold(envOrDefault("GOVER_GB28181_ENABLED", "false"), "true"),
+		GB28181ListenIP:          envOrDefault("GOVER_GB28181_LISTEN_IP", "0.0.0.0"),
+		GB28181ListenPort:        envIntOrDefault("GOVER_GB28181_LISTEN_PORT", 5060),
+		GB28181Transport:         envOrDefault("GOVER_GB28181_TRANSPORT", "udp"),
+		GB28181ServerID:          envOrDefault("GOVER_GB28181_SERVER_ID", "34020000002000000001"),
+		GB28181Realm:             envOrDefault("GOVER_GB28181_REALM", "3402000000"),
+		GB28181Password:          envOrDefault("GOVER_GB28181_PASSWORD", "123456"),
+		GB28181RegisterExpires:   envIntOrDefault("GOVER_GB28181_REGISTER_EXPIRES", 3600),
+		GB28181HeartbeatInterval: envIntOrDefault("GOVER_GB28181_HEARTBEAT_INTERVAL", 60),
+		GB28181MediaIP:           envOrDefault("GOVER_GB28181_MEDIA_IP", ""),
+		GB28181MediaPort:         envIntOrDefault("GOVER_GB28181_MEDIA_PORT", 30000),
+		GB28181MediaPortStart:    envIntOrDefault("GOVER_GB28181_MEDIA_PORT_START", 30000),
+		GB28181MediaPortEnd:      envIntOrDefault("GOVER_GB28181_MEDIA_PORT_END", 30100),
+		GB28181AckTimeoutSec:     envIntOrDefault("GOVER_GB28181_ACK_TIMEOUT_SEC", 10),
+		ConfigFile:               configFile,
 	}
 	cfg = normalizeConfig(cfg, configFile)
 	if cfg.DBPath == "" {
@@ -256,6 +284,49 @@ func normalizeConfig(cfg Config, configFile string) Config {
 	}
 	if strings.TrimSpace(cfg.BiliBuild) == "" {
 		cfg.BiliBuild = "9482"
+	}
+	if strings.TrimSpace(cfg.GB28181ListenIP) == "" {
+		cfg.GB28181ListenIP = "0.0.0.0"
+	}
+	if cfg.GB28181ListenPort <= 0 {
+		cfg.GB28181ListenPort = 5060
+	}
+	transport := strings.ToLower(strings.TrimSpace(cfg.GB28181Transport))
+	switch transport {
+	case "udp", "tcp", "both":
+		cfg.GB28181Transport = transport
+	default:
+		cfg.GB28181Transport = "udp"
+	}
+	if strings.TrimSpace(cfg.GB28181ServerID) == "" {
+		cfg.GB28181ServerID = "34020000002000000001"
+	}
+	if strings.TrimSpace(cfg.GB28181Realm) == "" {
+		cfg.GB28181Realm = "3402000000"
+	}
+	if cfg.GB28181RegisterExpires <= 0 {
+		cfg.GB28181RegisterExpires = 3600
+	}
+	if cfg.GB28181HeartbeatInterval <= 0 {
+		cfg.GB28181HeartbeatInterval = 60
+	}
+	if cfg.GB28181MediaPort <= 0 {
+		cfg.GB28181MediaPort = 30000
+	}
+	if cfg.GB28181MediaPortStart <= 0 {
+		cfg.GB28181MediaPortStart = cfg.GB28181MediaPort
+	}
+	if cfg.GB28181MediaPortEnd <= 0 {
+		cfg.GB28181MediaPortEnd = cfg.GB28181MediaPortStart + 100
+	}
+	if cfg.GB28181MediaPortEnd < cfg.GB28181MediaPortStart {
+		cfg.GB28181MediaPortStart, cfg.GB28181MediaPortEnd = cfg.GB28181MediaPortEnd, cfg.GB28181MediaPortStart
+	}
+	if cfg.GB28181MediaPort < cfg.GB28181MediaPortStart || cfg.GB28181MediaPort > cfg.GB28181MediaPortEnd {
+		cfg.GB28181MediaPort = cfg.GB28181MediaPortStart
+	}
+	if cfg.GB28181AckTimeoutSec <= 0 {
+		cfg.GB28181AckTimeoutSec = 10
 	}
 	if strings.TrimSpace(cfg.FFmpegPath) == "" {
 		cfg.FFmpegPath = defaultFFmpegPathByOS()

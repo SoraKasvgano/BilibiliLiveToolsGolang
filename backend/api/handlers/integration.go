@@ -994,6 +994,7 @@ func (m *integrationModule) ptzCommand(w http.ResponseWriter, r *http.Request) {
 		Username     string  `json:"username"`
 		Password     string  `json:"password"`
 		ProfileToken string  `json:"profileToken"`
+		PresetToken  string  `json:"presetToken"`
 		Action       string  `json:"action"`
 		Direction    string  `json:"direction"`
 		Speed        float64 `json:"speed"`
@@ -1019,6 +1020,7 @@ func (m *integrationModule) ptzCommand(w http.ResponseWriter, r *http.Request) {
 		Username:     req.Username,
 		Password:     req.Password,
 		ProfileToken: req.ProfileToken,
+		PresetToken:  req.PresetToken,
 		Action:       req.Action,
 		Direction:    req.Direction,
 		Speed:        req.Speed,

@@ -15,6 +15,7 @@ import (
 	authsvc "bilibililivetools/gover/backend/service/auth"
 	"bilibililivetools/gover/backend/service/bilibili"
 	ffsvc "bilibililivetools/gover/backend/service/ffmpeg"
+	gbsvc "bilibililivetools/gover/backend/service/gb28181"
 	"bilibililivetools/gover/backend/service/integration"
 	"bilibililivetools/gover/backend/service/maintenance"
 	"bilibililivetools/gover/backend/service/monitor"
@@ -30,6 +31,7 @@ type Dependencies struct {
 	Auth        *authsvc.Service
 	FFmpeg      *ffsvc.Service
 	Stream      *stream.Manager
+	GB28181     *gbsvc.Service
 	Bilibili    bilibili.Service
 	Integration *integration.Service
 	Maintenance *maintenance.Service

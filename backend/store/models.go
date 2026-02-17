@@ -49,6 +49,8 @@ const (
 	InputTypeRTSP       InputType = "rtsp"
 	InputTypeMJPEG      InputType = "mjpeg"
 	InputTypeONVIF      InputType = "onvif"
+	InputTypeRTMP       InputType = "rtmp"
+	InputTypeGB28181    InputType = "gb28181"
 )
 
 type InputAudioSource string
@@ -61,7 +63,7 @@ const (
 func NormalizeInputType(newType string, legacyType int) InputType {
 	if strings.TrimSpace(newType) != "" {
 		switch InputType(strings.ToLower(strings.TrimSpace(newType))) {
-		case InputTypeVideo, InputTypeDesktop, InputTypeUSBCamera, InputTypeCameraPlus, InputTypeRTSP, InputTypeMJPEG, InputTypeONVIF:
+		case InputTypeVideo, InputTypeDesktop, InputTypeUSBCamera, InputTypeCameraPlus, InputTypeRTSP, InputTypeMJPEG, InputTypeONVIF, InputTypeRTMP, InputTypeGB28181:
 			return InputType(strings.ToLower(strings.TrimSpace(newType)))
 		}
 	}
@@ -121,6 +123,8 @@ type PushSetting struct {
 	InputDevicePlugins    string             `json:"inputDevicePlugins"`
 	RTSPURL               string             `json:"rtspUrl"`
 	MJPEGURL              string             `json:"mjpegUrl"`
+	RTMPURL               string             `json:"rtmpUrl"`
+	GBPullURL             string             `json:"gbPullUrl"`
 	ONVIFEndpoint         string             `json:"onvifEndpoint"`
 	ONVIFUsername         string             `json:"onvifUsername"`
 	ONVIFPassword         string             `json:"onvifPassword"`
@@ -161,6 +165,8 @@ type PushSettingUpdateRequest struct {
 	DesktopAudioDevice     string             `json:"desktopAudioDeviceName"`
 	RTSPURL                string             `json:"rtspUrl"`
 	MJPEGURL               string             `json:"mjpegUrl"`
+	RTMPURL                string             `json:"rtmpUrl"`
+	GBPullURL              string             `json:"gbPullUrl"`
 	ONVIFEndpoint          string             `json:"onvifEndpoint"`
 	ONVIFUsername          string             `json:"onvifUsername"`
 	ONVIFPassword          string             `json:"onvifPassword"`
@@ -457,15 +463,17 @@ type DeviceInfo struct {
 type CameraSourceType string
 
 const (
-	CameraSourceTypeRTSP  CameraSourceType = "rtsp"
-	CameraSourceTypeMJPEG CameraSourceType = "mjpeg"
-	CameraSourceTypeONVIF CameraSourceType = "onvif"
-	CameraSourceTypeUSB   CameraSourceType = "usb"
+	CameraSourceTypeRTSP    CameraSourceType = "rtsp"
+	CameraSourceTypeMJPEG   CameraSourceType = "mjpeg"
+	CameraSourceTypeONVIF   CameraSourceType = "onvif"
+	CameraSourceTypeUSB     CameraSourceType = "usb"
+	CameraSourceTypeRTMP    CameraSourceType = "rtmp"
+	CameraSourceTypeGB28181 CameraSourceType = "gb28181"
 )
 
 func NormalizeCameraSourceType(raw string) CameraSourceType {
 	switch CameraSourceType(strings.ToLower(strings.TrimSpace(raw))) {
-	case CameraSourceTypeRTSP, CameraSourceTypeMJPEG, CameraSourceTypeONVIF, CameraSourceTypeUSB:
+	case CameraSourceTypeRTSP, CameraSourceTypeMJPEG, CameraSourceTypeONVIF, CameraSourceTypeUSB, CameraSourceTypeRTMP, CameraSourceTypeGB28181:
 		return CameraSourceType(strings.ToLower(strings.TrimSpace(raw)))
 	default:
 		return ""
@@ -478,6 +486,12 @@ type CameraSource struct {
 	SourceType          CameraSourceType `json:"sourceType"`
 	RTSPURL             string           `json:"rtspUrl"`
 	MJPEGURL            string           `json:"mjpegUrl"`
+	RTMPURL             string           `json:"rtmpUrl"`
+	GBPullURL           string           `json:"gbPullUrl"`
+	GBDeviceID          string           `json:"gbDeviceId"`
+	GBChannelID         string           `json:"gbChannelId"`
+	GBServer            string           `json:"gbServer"`
+	GBTransport         string           `json:"gbTransport"`
 	ONVIFEndpoint       string           `json:"onvifEndpoint"`
 	ONVIFUsername       string           `json:"onvifUsername"`
 	ONVIFPassword       string           `json:"onvifPassword"`
@@ -497,6 +511,10 @@ func (c CameraSource) StreamURL() string {
 		return strings.TrimSpace(c.RTSPURL)
 	case CameraSourceTypeMJPEG:
 		return strings.TrimSpace(c.MJPEGURL)
+	case CameraSourceTypeRTMP:
+		return strings.TrimSpace(c.RTMPURL)
+	case CameraSourceTypeGB28181:
+		return strings.TrimSpace(c.GBPullURL)
 	default:
 		return ""
 	}
@@ -515,6 +533,12 @@ type CameraSourceSaveRequest struct {
 	SourceType          string `json:"sourceType"`
 	RTSPURL             string `json:"rtspUrl"`
 	MJPEGURL            string `json:"mjpegUrl"`
+	RTMPURL             string `json:"rtmpUrl"`
+	GBPullURL           string `json:"gbPullUrl"`
+	GBDeviceID          string `json:"gbDeviceId"`
+	GBChannelID         string `json:"gbChannelId"`
+	GBServer            string `json:"gbServer"`
+	GBTransport         string `json:"gbTransport"`
 	ONVIFEndpoint       string `json:"onvifEndpoint"`
 	ONVIFUsername       string `json:"onvifUsername"`
 	ONVIFPassword       string `json:"onvifPassword"`
@@ -524,6 +548,144 @@ type CameraSourceSaveRequest struct {
 	USBDeviceFramerate  int    `json:"usbDeviceFramerate"`
 	Description         string `json:"description"`
 	Enabled             bool   `json:"enabled"`
+}
+
+type GB28181DeviceStatus string
+
+const (
+	GB28181DeviceStatusOnline  GB28181DeviceStatus = "online"
+	GB28181DeviceStatusOffline GB28181DeviceStatus = "offline"
+	GB28181DeviceStatusUnknown GB28181DeviceStatus = "unknown"
+)
+
+type GB28181SessionStatus string
+
+const (
+	GB28181SessionStatusInviting    GB28181SessionStatus = "inviting"
+	GB28181SessionStatusEstablished GB28181SessionStatus = "established"
+	GB28181SessionStatusTerminated  GB28181SessionStatus = "terminated"
+	GB28181SessionStatusFailed      GB28181SessionStatus = "failed"
+)
+
+type GB28181Device struct {
+	ID              int64              `json:"id"`
+	DeviceID        string             `json:"deviceId"`
+	Name            string             `json:"name"`
+	AuthPassword    string             `json:"authPassword"`
+	Transport       string             `json:"transport"`
+	RemoteAddr      string             `json:"remoteAddr"`
+	Status          GB28181DeviceStatus `json:"status"`
+	Expires         int                `json:"expires"`
+	LastRegisterAt  *time.Time         `json:"lastRegisterAt,omitempty"`
+	LastKeepaliveAt *time.Time         `json:"lastKeepaliveAt,omitempty"`
+	Manufacturer    string             `json:"manufacturer"`
+	Model           string             `json:"model"`
+	Firmware        string             `json:"firmware"`
+	RawPayload      string             `json:"rawPayload"`
+	CreatedAt       time.Time          `json:"createdAt"`
+	UpdatedAt       time.Time          `json:"updatedAt"`
+}
+
+type GB28181Channel struct {
+	ID           int64     `json:"id"`
+	DeviceRowID  int64     `json:"deviceRowId"`
+	DeviceID     string    `json:"deviceId"`
+	ChannelID    string    `json:"channelId"`
+	Name         string    `json:"name"`
+	Manufacturer string    `json:"manufacturer"`
+	Model        string    `json:"model"`
+	Owner        string    `json:"owner"`
+	CivilCode    string    `json:"civilCode"`
+	Address      string    `json:"address"`
+	Parental     int       `json:"parental"`
+	ParentID     string    `json:"parentId"`
+	SafetyWay    int       `json:"safetyWay"`
+	RegisterWay  int       `json:"registerWay"`
+	Secrecy      int       `json:"secrecy"`
+	Status       string    `json:"status"`
+	Longitude    string    `json:"longitude"`
+	Latitude     string    `json:"latitude"`
+	RawPayload   string    `json:"rawPayload"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type GB28181Session struct {
+	ID         int64               `json:"id"`
+	DeviceRowID int64              `json:"deviceRowId"`
+	DeviceID   string              `json:"deviceId"`
+	ChannelID  string              `json:"channelId"`
+	CallID     string              `json:"callId"`
+	Branch     string              `json:"branch"`
+	StreamID   string              `json:"streamId"`
+	RemoteAddr string              `json:"remoteAddr"`
+	Status     GB28181SessionStatus `json:"status"`
+	SDPBody    string              `json:"sdpBody"`
+	CreatedAt  time.Time           `json:"createdAt"`
+	UpdatedAt  time.Time           `json:"updatedAt"`
+	EndedAt    *time.Time          `json:"endedAt,omitempty"`
+}
+
+type GB28181DeviceListRequest struct {
+	Keyword string
+	Status  string
+	Page    int
+	Limit   int
+}
+
+type GB28181DeviceSaveRequest struct {
+	ID           int64  `json:"id"`
+	DeviceID     string `json:"deviceId"`
+	Name         string `json:"name"`
+	AuthPassword string `json:"authPassword"`
+	Transport    string `json:"transport"`
+	RemoteAddr   string `json:"remoteAddr"`
+	Enabled      bool   `json:"enabled"`
+}
+
+type GB28181RuntimeDeviceUpsertRequest struct {
+	DeviceID       string
+	Name           string
+	Transport      string
+	RemoteAddr     string
+	Expires        int
+	Manufacturer   string
+	Model          string
+	Firmware       string
+	RawPayload     string
+	LastRegisterAt *time.Time
+	LastKeepaliveAt *time.Time
+	Status         GB28181DeviceStatus
+}
+
+type GB28181ChannelUpsertRequest struct {
+	DeviceID     string
+	ChannelID    string
+	Name         string
+	Manufacturer string
+	Model        string
+	Owner        string
+	CivilCode    string
+	Address      string
+	Parental     int
+	ParentID     string
+	SafetyWay    int
+	RegisterWay  int
+	Secrecy      int
+	Status       string
+	Longitude    string
+	Latitude     string
+	RawPayload   string
+}
+
+type GB28181SessionUpsertRequest struct {
+	DeviceID   string
+	ChannelID  string
+	CallID     string
+	Branch     string
+	StreamID   string
+	RemoteAddr string
+	Status     GB28181SessionStatus
+	SDPBody    string
 }
 
 type LiveEvent struct {

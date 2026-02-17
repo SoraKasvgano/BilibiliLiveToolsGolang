@@ -136,6 +136,8 @@
             <option value="desktop">桌面</option>
             <option value="rtsp">RTSP</option>
             <option value="mjpeg">MJPEG</option>
+            <option value="rtmp">RTMP</option>
+            <option value="gb28181">GB28181</option>
             <option value="onvif">ONVIF(预留)</option>
           </select>
         </label>
@@ -173,6 +175,10 @@
         <label>MJPEG URL<input id="pushMjpegUrl" placeholder="http://ip:port/mjpeg" /></label>
       </div>
       <div class="grid two">
+        <label>RTMP URL<input id="pushRtmpUrl" placeholder="rtmp://ip/app/stream" /></label>
+        <label>GB28181 Pull URL<input id="pushGbPullUrl" placeholder="rtsp://zlm/live/340200... or http://.../live.flv" /></label>
+      </div>
+      <div class="grid two">
         <label>多路拼屏推流
           <select id="pushMultiEnabled">
             <option value="false" selected>关闭</option>
@@ -208,6 +214,8 @@
             <option value="">全部</option>
             <option value="rtsp">RTSP</option>
             <option value="mjpeg">MJPEG</option>
+            <option value="rtmp">RTMP</option>
+            <option value="gb28181">GB28181</option>
             <option value="onvif">ONVIF</option>
           </select>
         </label>
@@ -346,9 +354,24 @@
             <option value="zoom_out">zoom_out</option>
             <option value="stop">stop</option>
             <option value="home">home</option>
+            <option value="status">status</option>
+            <option value="relative">relative</option>
+            <option value="absolute">absolute</option>
+            <option value="goto_preset">goto_preset</option>
+            <option value="set_preset">set_preset</option>
+            <option value="remove_preset">remove_preset</option>
           </select>
         </label>
         <label>速度<input id="ptzSpeed" type="number" value="0.3" step="0.1" /></label>
+      </div>
+      <div class="grid two">
+        <label>时长(ms，连续移动用)<input id="ptzDurationMs" type="number" value="700" /></label>
+        <label>PresetToken（预置位）<input id="ptzPresetToken" placeholder="goto/remove 需要；set 可留空自动生成" /></label>
+      </div>
+      <div class="grid three">
+        <label>Pan<input id="ptzPan" type="number" value="0" step="0.1" /></label>
+        <label>Tilt<input id="ptzTilt" type="number" value="0" step="0.1" /></label>
+        <label>Zoom<input id="ptzZoom" type="number" value="0" step="0.1" /></label>
       </div>
       <div class="actions">
         <button id="btnPTZDiscover">自动发现 ONVIF 设备</button>

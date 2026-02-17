@@ -30,6 +30,8 @@
             <option value="">全部</option>
             <option value="rtsp">RTSP</option>
             <option value="mjpeg">MJPEG</option>
+            <option value="rtmp">RTMP</option>
+            <option value="gb28181">GB28181</option>
             <option value="onvif">ONVIF</option>
             <option value="usb">USB</option>
           </select>
@@ -63,6 +65,8 @@
             <option value="desktop">桌面</option>
             <option value="rtsp">RTSP</option>
             <option value="mjpeg">MJPEG</option>
+            <option value="rtmp">RTMP</option>
+            <option value="gb28181">GB28181</option>
             <option value="onvif">ONVIF</option>
           </select>
         </label>
@@ -115,6 +119,14 @@
       <div id="panelMJPEG" class="soft-panel panel-hidden">
         <h3>MJPEG</h3>
         <label>MJPEG URL<input id="mjpegUrl" placeholder="http://ip:port/mjpeg" /></label>
+      </div>
+      <div id="panelRTMP" class="soft-panel panel-hidden">
+        <h3>RTMP</h3>
+        <label>RTMP URL<input id="rtmpUrl" placeholder="rtmp://ip/app/stream" /></label>
+      </div>
+      <div id="panelGB28181" class="soft-panel panel-hidden">
+        <h3>GB28181</h3>
+        <label>Pull URL<input id="gbPullUrl" placeholder="rtsp://zlm/live/340200... or http://.../live.flv" /></label>
       </div>
       <div id="panelONVIF" class="soft-panel panel-hidden">
         <h3>ONVIF（明文用户名/密码）</h3>
@@ -290,6 +302,8 @@
       const inputType = asText("inputType");
       setPanelVisible("panelRTSP", inputType === "rtsp");
       setPanelVisible("panelMJPEG", inputType === "mjpeg");
+      setPanelVisible("panelRTMP", inputType === "rtmp");
+      setPanelVisible("panelGB28181", inputType === "gb28181");
       setPanelVisible("panelONVIF", inputType === "onvif");
       setPanelVisible("panelUSB", inputType === "usb_camera" || inputType === "usb_camera_plus");
     }
@@ -308,6 +322,12 @@
       if (type === "mjpeg") {
         return "ffmpeg -f mjpeg -i \"http://ip:port/mjpeg\" -an " + commonOut;
       }
+      if (type === "rtmp") {
+        return "ffmpeg -i \"rtmp://ip/app/stream\" -an " + commonOut;
+      }
+      if (type === "gb28181") {
+        return "ffmpeg -i \"rtsp://media-server/live/340200...\" -an " + commonOut;
+      }
       if (type === "usb_camera" || type === "usb_camera_plus") {
         return "ffmpeg -f dshow -video_size 1280x720 -framerate 30 -i video=\"HD Pro Webcam C920\" -an " + commonOut;
       }
@@ -324,7 +344,7 @@
         commandEl.value = recommendedAdvancedCommand(inputType);
         return;
       }
-      const networkType = inputType === "rtsp" || inputType === "mjpeg" || inputType === "onvif";
+      const networkType = inputType === "rtsp" || inputType === "mjpeg" || inputType === "onvif" || inputType === "rtmp" || inputType === "gb28181";
       if (networkType && isUsbTemplateCommand(current)) {
         commandEl.value = recommendedAdvancedCommand(inputType);
       }
@@ -334,6 +354,8 @@
       const value = String(type || "").toLowerCase();
       if (value === "rtsp") return "RTSP";
       if (value === "mjpeg") return "MJPEG";
+      if (value === "rtmp") return "RTMP";
+      if (value === "gb28181") return "GB28181";
       if (value === "onvif") return "ONVIF";
       if (value === "usb") return "USB";
       return value || "unknown";
@@ -344,6 +366,8 @@
       const type = String(item.sourceType || "").toLowerCase();
       if (type === "rtsp" || type === "onvif") return item.rtspUrl || item.onvifEndpoint || "";
       if (type === "mjpeg") return item.mjpegUrl || "";
+      if (type === "rtmp") return item.rtmpUrl || "";
+      if (type === "gb28181") return item.gbPullUrl || item.gbDeviceId || "";
       if (type === "usb") return item.usbDeviceName || "";
       return "";
     }
@@ -357,6 +381,12 @@
       } else if (type === "mjpeg") {
         document.getElementById("inputType").value = "mjpeg";
         document.getElementById("mjpegUrl").value = item.mjpegUrl || "";
+      } else if (type === "rtmp") {
+        document.getElementById("inputType").value = "rtmp";
+        document.getElementById("rtmpUrl").value = item.rtmpUrl || "";
+      } else if (type === "gb28181") {
+        document.getElementById("inputType").value = "gb28181";
+        document.getElementById("gbPullUrl").value = item.gbPullUrl || "";
       } else if (type === "onvif") {
         document.getElementById("inputType").value = "onvif";
         document.getElementById("onvifEndpoint").value = item.onvifEndpoint || "";
@@ -409,6 +439,8 @@
           "inputType",
           "rtspUrl",
           "mjpegUrl",
+          "rtmpUrl",
+          "gbPullUrl",
           "onvifEndpoint",
           "onvifUsername",
           "onvifPassword",
@@ -434,6 +466,8 @@
       document.getElementById("ffmpegCommand").value = data.ffmpegCommand || "";
       document.getElementById("rtspUrl").value = data.rtspUrl || "";
       document.getElementById("mjpegUrl").value = data.mjpegUrl || "";
+      document.getElementById("rtmpUrl").value = data.rtmpUrl || "";
+      document.getElementById("gbPullUrl").value = data.gbPullUrl || "";
       document.getElementById("onvifEndpoint").value = data.onvifEndpoint || "";
       document.getElementById("onvifUsername").value = data.onvifUsername || "";
       document.getElementById("onvifPassword").value = data.onvifPassword || "";
@@ -466,6 +500,8 @@
         ffmpegCommand: document.getElementById("ffmpegCommand").value || "",
         rtspUrl: asText("rtspUrl"),
         mjpegUrl: asText("mjpegUrl"),
+        rtmpUrl: asText("rtmpUrl"),
+        gbPullUrl: asText("gbPullUrl"),
         onvifEndpoint: asText("onvifEndpoint"),
         onvifUsername: asText("onvifUsername"),
         onvifPassword: document.getElementById("onvifPassword").value || "",

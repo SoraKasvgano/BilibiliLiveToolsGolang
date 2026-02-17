@@ -112,6 +112,7 @@
       { key: "home", label: "功能首页", href: "/app/pages/home.html" },
       { key: "login", label: "扫码登录", href: "/app/pages/login.html" },
       { key: "cameras", label: "摄像头管理", href: "/app/pages/cameras.html" },
+      { key: "gb28181", label: "GB28181平台", href: "/app/pages/gb28181.html" },
       { key: "push", label: "推流配置", href: "/app/pages/push.html" },
       { key: "room", label: "直播间设置", href: "/app/pages/room.html" },
       { key: "material", label: "素材库", href: "/app/pages/material.html" },

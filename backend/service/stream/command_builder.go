@@ -216,6 +216,43 @@ func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 			hasAudio = true
 		}
 
+	case store.InputTypeRTMP:
+		if strings.TrimSpace(ctx.Setting.RTMPURL) == "" {
+			return "", nil, errors.New("rtmp url is required")
+		}
+		args = append(args, "-i", strings.TrimSpace(ctx.Setting.RTMPURL))
+		if ctx.AudioMaterial != nil {
+			audioPath := filepath.Join(ctx.MediaDir, filepath.FromSlash(ctx.AudioMaterial.Path))
+			args = append(args, "-stream_loop", "-1", "-i", audioPath, "-map", "0:v:0", "-map", "1:a:0")
+			hasAudio = true
+		} else if !ctx.Setting.IsMute {
+			hasAudio = true
+		}
+
+	case store.InputTypeGB28181:
+		gbURL := normalizeGBPullURL(strings.TrimSpace(ctx.Setting.GBPullURL))
+		if gbURL == "" {
+			return "", nil, errors.New("gb28181 pull url is required")
+		}
+		if isSDPSource(gbURL) {
+			forceVideoTranscode = true
+			args = append(args, "-protocol_whitelist", "file,udp,rtp,tcp", "-fflags", "+genpts", "-i", gbURL)
+		} else if isRTSPSource(gbURL) {
+			args = append(args, "-rtsp_transport", "tcp", "-i", gbURL)
+		} else if looksLikeMJPEG(gbURL) {
+			forceVideoTranscode = true
+			args = append(args, "-f", "mjpeg", "-i", gbURL)
+		} else {
+			args = append(args, "-i", gbURL)
+		}
+		if ctx.AudioMaterial != nil {
+			audioPath := filepath.Join(ctx.MediaDir, filepath.FromSlash(ctx.AudioMaterial.Path))
+			args = append(args, "-stream_loop", "-1", "-i", audioPath, "-map", "0:v:0", "-map", "1:a:0")
+			hasAudio = true
+		} else if !ctx.Setting.IsMute {
+			hasAudio = true
+		}
+
 	case store.InputTypeONVIF:
 		if strings.TrimSpace(ctx.Setting.RTSPURL) == "" {
 			return "", nil, errors.New("onvif input currently expects a resolved rtsp url")

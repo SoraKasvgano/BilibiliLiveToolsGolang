@@ -73,6 +73,26 @@ func BuildPreviewCommand(ctx BuildContext, options PreviewOptions) (string, []st
 				return "", nil, errors.New("mjpeg url is required")
 			}
 			args = append(args, "-f", "mjpeg", "-i", streamURL)
+		case store.InputTypeRTMP:
+			streamURL := strings.TrimSpace(ctx.Setting.RTMPURL)
+			if streamURL == "" {
+				return "", nil, errors.New("rtmp url is required")
+			}
+			args = append(args, "-i", streamURL)
+		case store.InputTypeGB28181:
+			streamURL := normalizeGBPullURL(strings.TrimSpace(ctx.Setting.GBPullURL))
+			if streamURL == "" {
+				return "", nil, errors.New("gb28181 pull url is required")
+			}
+			if isSDPSource(streamURL) {
+				args = append(args, "-protocol_whitelist", "file,udp,rtp,tcp", "-fflags", "+genpts", "-i", streamURL)
+			} else if isRTSPSource(streamURL) {
+				args = append(args, "-rtsp_transport", "tcp", "-i", streamURL)
+			} else if looksLikeMJPEG(streamURL) {
+				args = append(args, "-f", "mjpeg", "-i", streamURL)
+			} else {
+				args = append(args, "-i", streamURL)
+			}
 		case store.InputTypeONVIF:
 			streamURL := strings.TrimSpace(ctx.Setting.RTSPURL)
 			if streamURL == "" {

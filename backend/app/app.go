@@ -21,6 +21,7 @@ import (
 	authsvc "bilibililivetools/gover/backend/service/auth"
 	"bilibililivetools/gover/backend/service/bilibili"
 	ffsvc "bilibililivetools/gover/backend/service/ffmpeg"
+	gbsvc "bilibililivetools/gover/backend/service/gb28181"
 	"bilibililivetools/gover/backend/service/integration"
 	"bilibililivetools/gover/backend/service/maintenance"
 	"bilibililivetools/gover/backend/service/monitor"
@@ -39,6 +40,7 @@ type App struct {
 	telemetry   *telemetry.Service
 	integration *integration.Service
 	maintenance *maintenance.Service
+	gb28181     *gbsvc.Service
 	frontendFS  fs.FS
 	apiHandler  http.Handler
 	routes      []router.Route
@@ -65,6 +67,7 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 	maintenanceSvc := maintenance.New(storeDB)
 	monitorSvc := monitor.New(storeDB, cfg.LogBufferSize)
 	onvifSvc := onvif.New()
+	gbSvc := gbsvc.New(storeDB, cfg)
 	streamMgr := stream.NewManager(storeDB, ffmpegSvc, bilibiliSvc, cfg.MediaDir, cfg.LogBufferSize, cfg.EnableDebugLogs || cfg.DebugMode)
 	telemetrySvc := telemetry.New(storeDB, bilibiliSvc, streamMgr.Status)
 	integrationSvc := integration.New(storeDB, streamMgr, bilibiliSvc, onvifSvc)
@@ -81,6 +84,7 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 		Auth:        authService,
 		FFmpeg:      ffmpegSvc,
 		Stream:      streamMgr,
+		GB28181:     gbSvc,
 		Bilibili:    bilibiliSvc,
 		Integration: integrationSvc,
 		Maintenance: maintenanceSvc,
@@ -111,6 +115,7 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 		telemetry:   telemetrySvc,
 		integration: integrationSvc,
 		maintenance: maintenanceSvc,
+		gb28181:     gbSvc,
 		frontendFS:  frontendSub,
 		apiHandler:  apiHandler,
 		routes:      routes,
@@ -121,6 +126,7 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 		log.Printf("[config] hot reload applied from %s", newCfg.ConfigFile)
 		ffmpegSvc.UpdatePaths(newCfg.FFmpegPath, newCfg.FFprobePath)
 		bilibiliSvc.UpdateConfig(newCfg)
+		gbSvc.UpdateConfig(newCfg)
 		streamMgr.UpdateDebug(newCfg.EnableDebugLogs || newCfg.DebugMode)
 		if err := loggerMgr.Update(newCfg); err != nil {
 			log.Printf("[config][warn] update logger failed: %v", err)
@@ -250,6 +256,11 @@ func (a *App) Run() error {
 	a.telemetry.Start()
 	a.integration.Start()
 	a.maintenance.Start()
+	if a.gb28181 != nil && a.cfg.GB28181Enabled {
+		if err := a.gb28181.Start(context.Background()); err != nil {
+			log.Printf("startup gb28181 skipped: %v", err)
+		}
+	}
 	log.Printf("gover listening on %s", a.cfg.ListenAddr)
 	return a.server.ListenAndServe()
 }
@@ -262,6 +273,9 @@ func (a *App) Shutdown(ctx context.Context) error {
 	a.maintenance.Stop()
 	a.integration.Stop()
 	a.telemetry.Stop()
+	if a.gb28181 != nil {
+		_ = a.gb28181.Stop(ctx)
+	}
 	_ = a.stream.Stop(ctx)
 	shutdownErr := a.server.Shutdown(ctx)
 	closeErr := a.store.Close()
@@ -416,6 +430,8 @@ func routeExample(method string, pattern string) map[string]any {
 				"outputResolution": "1920x1080",
 				"outputQuality":    2,
 				"rtspUrl":          "rtsp://127.0.0.1/live/stream1",
+				"rtmpUrl":          "",
+				"gbPullUrl":        "",
 				"isAutoRetry":      true,
 				"retryInterval":    30,
 			},
@@ -433,12 +449,16 @@ func routeExample(method string, pattern string) map[string]any {
 	case "POST /api/v1/ptz/command":
 		return map[string]any{
 			"request": map[string]any{
-				"endpoint":   "http://192.168.1.20/onvif/device_service",
-				"username":   "admin",
-				"password":   "123456",
-				"action":     "left",
-				"speed":      0.3,
-				"durationMs": 700,
+				"endpoint":    "http://192.168.1.20/onvif/device_service",
+				"username":    "admin",
+				"password":    "123456",
+				"action":      "left",
+				"speed":       0.3,
+				"durationMs":  700,
+				"presetToken": "",
+				"pan":         0,
+				"tilt":        0,
+				"zoom":        0,
 			},
 		}
 	case "POST /api/v1/integration/notify":
@@ -453,14 +473,14 @@ func routeExample(method string, pattern string) map[string]any {
 	case "POST /api/v1/cameras/save":
 		return map[string]any{
 			"request": map[string]any{
-				"name":              "客厅主机位",
-				"sourceType":        "onvif",
-				"rtspUrl":           "rtsp://admin:123456@192.168.1.10/stream1",
-				"onvifEndpoint":     "http://192.168.1.10/onvif/device_service",
-				"onvifUsername":     "admin",
-				"onvifPassword":     "123456",
-				"onvifProfileToken": "profile_1",
-				"enabled":           true,
+				"name":        "GB28181-EastGate",
+				"sourceType":  "gb28181",
+				"gbPullUrl":   "rtsp://127.0.0.1/live/34020000001320000001",
+				"gbDeviceId":  "34020000001320000001",
+				"gbChannelId": "34020000001310000001",
+				"gbServer":    "192.168.1.100:5060",
+				"gbTransport": "udp",
+				"enabled":     true,
 			},
 		}
 	case "POST /api/v1/cameras/delete":
