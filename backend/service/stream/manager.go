@@ -216,6 +216,9 @@ func (m *Manager) runOnce(ctx context.Context) error {
 	m.cmd = nil
 	m.mu.Unlock()
 	if err != nil {
+		if summary := m.recentFailureSummary(); summary != "" {
+			return fmt.Errorf("%w: %s", err, summary)
+		}
 		return err
 	}
 	return nil
@@ -344,4 +347,45 @@ func joinArgs(args []string) string {
 		}
 	}
 	return strings.Join(result, " ")
+}
+
+func (m *Manager) recentFailureSummary() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if len(m.logs) == 0 {
+		return ""
+	}
+	keywords := []string{
+		"error", "failed", "fail", "timeout", "timed out",
+		"invalid", "unauthorized", "forbidden", "refused",
+		"broken pipe", "could not", "not found",
+		"av_interleaved_write_frame", "server returned",
+	}
+	lines := make([]string, 0, 4)
+	for index := len(m.logs) - 1; index >= 0 && len(lines) < 4; index-- {
+		item := m.logs[index]
+		msg := strings.TrimSpace(item.Message)
+		if msg == "" {
+			continue
+		}
+		matched := strings.EqualFold(strings.TrimSpace(item.LogType), "Error")
+		if !matched {
+			lower := strings.ToLower(msg)
+			for _, keyword := range keywords {
+				if strings.Contains(lower, keyword) {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			continue
+		}
+		if len(msg) > 260 {
+			msg = msg[:260] + "..."
+		}
+		lines = append([]string{msg}, lines...)
+	}
+	return strings.Join(lines, " | ")
 }
