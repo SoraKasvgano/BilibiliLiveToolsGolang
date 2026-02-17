@@ -59,6 +59,7 @@ func buildAdvanceCommand(ctx BuildContext) (string, []string, error) {
 
 func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 	args := make([]string, 0, 64)
+	args = append(args, "-hide_banner")
 	forceVideoTranscode := false
 	addOutput := func(hasAudio bool) {
 		codec := strings.TrimSpace(ctx.Setting.CustomVideoCodec)
@@ -405,10 +406,23 @@ func appendMosaicInputArgs(ctx BuildContext, args *[]string, hasAudio *bool) err
 	}
 
 	if !ctx.Setting.IsMute {
-		*args = append(*args, "-map", "0:a:0?")
+		audioInputIndex := selectMosaicAudioSourceIndex(sources)
+		if audioInputIndex < 0 {
+			audioInputIndex = 0
+		}
+		*args = append(*args, "-map", fmt.Sprintf("%d:a:0?", audioInputIndex))
 		*hasAudio = true
 	}
 	return nil
+}
+
+func selectMosaicAudioSourceIndex(sources []store.MultiInputSource) int {
+	for idx, source := range sources {
+		if source.EnableAudio {
+			return idx
+		}
+	}
+	return -1
 }
 
 func buildGridMosaicFilter(sources []store.MultiInputSource, cols int, rows int, outW int, outH int) (string, error) {
@@ -807,15 +821,13 @@ func appendRTSPInputArgs(args []string, sourceURL string) []string {
 	if sourceURL == "" {
 		return args
 	}
-	// Keep RTSP pull conservative while allowing non-standard devices to negotiate UDP fallback.
+	// Keep RTSP pull compatible with ffmpeg 5.x/6.x; avoid options that differ across versions.
 	args = append(args,
-		"-rtsp_flags", "prefer_tcp",
-		"-rw_timeout", "60000000",
+		"-rtsp_transport", "tcp",
 		"-thread_queue_size", "1024",
 		"-analyzeduration", "10000000",
 		"-probesize", "5000000",
-		"-fflags", "+genpts+discardcorrupt",
-		"-use_wallclock_as_timestamps", "1",
+		"-fflags", "+genpts",
 		"-i", sourceURL,
 	)
 	return args

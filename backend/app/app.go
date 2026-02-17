@@ -55,6 +55,9 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 		return nil, fmt.Errorf("config manager is required")
 	}
 	cfg := cfgManager.Current()
+	log.Printf("[config] using config file: %s", cfg.ConfigFile)
+	log.Printf("[config] ffmpeg path: %s", cfg.FFmpegPath)
+	log.Printf("[config] ffprobe path: %s", cfg.FFprobePath)
 	if err := os.MkdirAll(cfg.MediaDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -129,6 +132,8 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 	}
 	cfgManager.AddListener(func(newCfg config.Config) {
 		log.Printf("[config] hot reload applied from %s", newCfg.ConfigFile)
+		log.Printf("[config] ffmpeg path updated: %s", newCfg.FFmpegPath)
+		log.Printf("[config] ffprobe path updated: %s", newCfg.FFprobePath)
 		ffmpegSvc.UpdatePaths(newCfg.FFmpegPath, newCfg.FFprobePath)
 		bilibiliSvc.UpdateConfig(newCfg)
 		gbSvc.UpdateConfig(newCfg)

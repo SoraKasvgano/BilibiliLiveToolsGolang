@@ -361,6 +361,8 @@ func (m *Manager) recentFailureSummary() string {
 		"invalid", "unauthorized", "forbidden", "refused",
 		"broken pipe", "could not", "not found",
 		"av_interleaved_write_frame", "server returned",
+		"connection", "i/o error", "end of file", "unsupported",
+		"unrecognized option", "option not found", "no such file",
 	}
 	lines := make([]string, 0, 4)
 	for index := len(m.logs) - 1; index >= 0 && len(lines) < 4; index-- {
@@ -369,14 +371,18 @@ func (m *Manager) recentFailureSummary() string {
 		if msg == "" {
 			continue
 		}
-		matched := strings.EqualFold(strings.TrimSpace(item.LogType), "Error")
-		if !matched {
-			lower := strings.ToLower(msg)
-			for _, keyword := range keywords {
-				if strings.Contains(lower, keyword) {
-					matched = true
-					break
-				}
+		lower := strings.ToLower(msg)
+		if isFFmpegBannerLine(lower) {
+			continue
+		}
+		if looksLikeFFmpegCommandLine(lower) {
+			continue
+		}
+		matched := false
+		for _, keyword := range keywords {
+			if strings.Contains(lower, keyword) {
+				matched = true
+				break
 			}
 		}
 		if !matched {
@@ -388,4 +394,42 @@ func (m *Manager) recentFailureSummary() string {
 		lines = append([]string{msg}, lines...)
 	}
 	return strings.Join(lines, " | ")
+}
+
+func isFFmpegBannerLine(lowerText string) bool {
+	lowerText = strings.TrimSpace(lowerText)
+	if lowerText == "" {
+		return true
+	}
+	if strings.HasPrefix(lowerText, "ffmpeg version ") {
+		return true
+	}
+	if strings.HasPrefix(lowerText, "built with ") {
+		return true
+	}
+	if strings.HasPrefix(lowerText, "configuration: ") {
+		return true
+	}
+	if strings.HasPrefix(lowerText, "libavutil") ||
+		strings.HasPrefix(lowerText, "libavcodec") ||
+		strings.HasPrefix(lowerText, "libavformat") ||
+		strings.HasPrefix(lowerText, "libavdevice") ||
+		strings.HasPrefix(lowerText, "libavfilter") ||
+		strings.HasPrefix(lowerText, "libswscale") ||
+		strings.HasPrefix(lowerText, "libswresample") ||
+		strings.HasPrefix(lowerText, "libpostproc") {
+		return true
+	}
+	return false
+}
+
+func looksLikeFFmpegCommandLine(lowerText string) bool {
+	lowerText = strings.TrimSpace(lowerText)
+	if strings.HasPrefix(lowerText, "exit status ") {
+		return true
+	}
+	if strings.Contains(lowerText, ".exe -") || strings.Contains(lowerText, "ffmpeg -") {
+		return true
+	}
+	return false
 }

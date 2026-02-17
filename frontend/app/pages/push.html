@@ -108,6 +108,17 @@
         </label>
         <label>重试间隔（秒）<input id="retryInterval" type="number" value="30" /></label>
       </div>
+      <div class="grid two">
+        <label>输入源声音
+          <select id="sourceAudioEnabled">
+            <option value="false" selected>关闭（默认）</option>
+            <option value="true">开启</option>
+          </select>
+        </label>
+        <label>说明
+          <input value="单路推流可直接开关；多路拼屏可在下方为某一路单独打开声音。" readonly />
+        </label>
+      </div>
     </section>
 
     <section class="page-card">
@@ -513,7 +524,7 @@
       const type = String(inputType || "").toLowerCase();
       const commonOut = "-vcodec libx264 -pix_fmt yuv420p -r 25 -g 50 -b:v 3500k -maxrate 3500k -bufsize 7000k -preset veryfast -tune zerolatency -f flv {URL}";
       if (type === "rtsp" || type === "onvif") {
-        return `ffmpeg -rtsp_flags prefer_tcp -rw_timeout 60000000 -i \"${type === "onvif" ? "rtsp://user:pass@ip/stream" : "rtsp://user:pass@ip/stream"}\" -an ${commonOut}`;
+        return `ffmpeg -rtsp_transport tcp -i \"${type === "onvif" ? "rtsp://user:pass@ip/stream" : "rtsp://user:pass@ip/stream"}\" -an ${commonOut}`;
       }
       if (type === "mjpeg") {
         return "ffmpeg -f mjpeg -i \"http://ip:port/mjpeg\" -an " + commonOut;
@@ -588,6 +599,7 @@
         url,
         title: String(item.name || cameraTypeLabel(type) || "Source").trim(),
         primary: false,
+        enableAudio: false,
         sourceType: type,
         materialId: 0,
         x: 0,
@@ -606,6 +618,7 @@
         url,
         title: String(item.title || "").trim(),
         primary: Boolean(item.primary),
+        enableAudio: Boolean(item.enableAudio),
         sourceType: String(item.sourceType || "").trim(),
         materialId: Number(item.materialId || 0) || 0,
         x: Number(item.x || 0) || 0,
@@ -622,6 +635,15 @@
       if (primaryIndex < 0) primaryIndex = 0;
       for (let i = 0; i < items.length; i++) {
         items[i].primary = i === primaryIndex;
+      }
+    }
+
+    function ensureSingleAudioSource(items) {
+      if (!Array.isArray(items) || items.length === 0) return;
+      let audioIndex = items.findIndex((item) => Boolean(item && item.enableAudio));
+      if (audioIndex < 0) return;
+      for (let i = 0; i < items.length; i++) {
+        items[i].enableAudio = i === audioIndex;
       }
     }
 
@@ -794,8 +816,10 @@
         next.push(normalized);
       }
       ensurePrimaryMultiInputSource(next);
+      ensureSingleAudioSource(next);
       ensureCanvasLayout(next);
       multiInputSources = next;
+      document.getElementById("sourceAudioEnabled").value = next.some((item) => item.enableAudio) ? "true" : "false";
       renderMultiInputList();
       renderMultiInputCanvas();
     }
@@ -835,6 +859,7 @@
           const moved = multiInputSources.splice(from, 1)[0];
           multiInputSources.splice(to, 0, moved);
           ensurePrimaryMultiInputSource(multiInputSources);
+          ensureSingleAudioSource(multiInputSources);
           for (let i = 0; i < multiInputSources.length; i++) {
             multiInputSources[i].z = i;
           }
@@ -873,6 +898,21 @@
         };
         head.appendChild(primaryBtn);
 
+        const audioBtn = document.createElement("button");
+        audioBtn.type = "button";
+        audioBtn.className = item.enableAudio ? "btn-warning btn-mini" : "btn-ghost btn-mini";
+        audioBtn.textContent = item.enableAudio ? "声音:开" : "声音:关";
+        audioBtn.onclick = () => {
+          const nextState = !multiInputSources[index].enableAudio;
+          for (let i = 0; i < multiInputSources.length; i++) {
+            multiInputSources[i].enableAudio = false;
+          }
+          multiInputSources[index].enableAudio = nextState;
+          document.getElementById("sourceAudioEnabled").value = nextState ? "true" : "false";
+          renderMultiInputList();
+        };
+        head.appendChild(audioBtn);
+
         const removeBtn = document.createElement("button");
         removeBtn.type = "button";
         removeBtn.className = "btn-danger btn-mini";
@@ -880,6 +920,8 @@
         removeBtn.onclick = () => {
           multiInputSources.splice(index, 1);
           ensurePrimaryMultiInputSource(multiInputSources);
+          ensureSingleAudioSource(multiInputSources);
+          document.getElementById("sourceAudioEnabled").value = multiInputSources.some((item) => item.enableAudio) ? "true" : "false";
           ensureCanvasLayout(multiInputSources);
           renderMultiInputList();
           renderMultiInputCanvas();
@@ -922,6 +964,7 @@
         normalized.push(source);
       }
       ensurePrimaryMultiInputSource(normalized);
+      ensureSingleAudioSource(normalized);
       multiInputSources = normalized;
       return normalized;
     }
@@ -962,6 +1005,7 @@
         added++;
       }
       ensurePrimaryMultiInputSource(multiInputSources);
+      ensureSingleAudioSource(multiInputSources);
       ensureCanvasLayout(multiInputSources);
       renderMultiInputList();
       renderMultiInputCanvas();
@@ -983,6 +1027,7 @@
         url,
         title: title || `Source-${multiInputSources.length + 1}`,
         primary: false,
+        enableAudio: false,
         sourceType,
         materialId: 0,
         x: 0,
@@ -992,6 +1037,7 @@
         z: multiInputSources.length,
       });
       ensurePrimaryMultiInputSource(multiInputSources);
+      ensureSingleAudioSource(multiInputSources);
       ensureCanvasLayout(multiInputSources);
       renderMultiInputList();
       renderMultiInputCanvas();
@@ -1091,6 +1137,7 @@
       applyBitratePresetFromValue(data.outputBitrateKbps || 0);
       document.getElementById("autoRetry").value = data.isAutoRetry ? "true" : "false";
       document.getElementById("retryInterval").value = String(data.retryInterval || 30);
+      document.getElementById("sourceAudioEnabled").value = data.isMute ? "false" : "true";
       document.getElementById("ffmpegCommand").value = data.ffmpegCommand || "";
       document.getElementById("rtspUrl").value = data.rtspUrl || "";
       document.getElementById("mjpegUrl").value = data.mjpegUrl || "";
@@ -1109,6 +1156,10 @@
       const fromMeta = Array.isArray(data.multiInputMeta) ? data.multiInputMeta : [];
       const fromURL = Array.isArray(data.multiInputUrls) ? data.multiInputUrls.map((url) => ({ url })) : [];
       mergeAndSetMultiInputSources(fromMeta.length ? fromMeta : fromURL);
+      if (data.multiInputEnabled) {
+        const hasAudioSource = multiInputSources.some((item) => item.enableAudio);
+        document.getElementById("sourceAudioEnabled").value = hasAudioSource ? "true" : "false";
+      }
       switchInputPanels();
       autoSuggestAdvancedCommand();
     }
@@ -1128,6 +1179,9 @@
       if (multiInputEnabled && multiSources.length < 2) {
         throw new Error("启用拼屏时至少需要 2 路有效输入源");
       }
+      const sourceAudioEnabled = asBool("sourceAudioEnabled");
+      const hasMultiAudioSource = multiSources.some((item) => Boolean(item.enableAudio));
+      const muteAll = multiInputEnabled ? !hasMultiAudioSource : !sourceAudioEnabled;
       const payload = {
         model: asNumber("model", 1),
         inputType,
@@ -1136,6 +1190,7 @@
         outputBitrateKbps: currentBitrateKbps(),
         isAutoRetry: asBool("autoRetry"),
         retryInterval: asNumber("retryInterval", 30),
+        isMute: muteAll,
         ffmpegCommand: document.getElementById("ffmpegCommand").value || "",
         rtspUrl: asText("rtspUrl"),
         mjpegUrl: asText("mjpegUrl"),
@@ -1236,7 +1291,21 @@
     document.getElementById("multiInputEnabled").onchange = () => {
       if (!asBool("multiInputEnabled")) {
         showToast("已关闭拼屏，推流将按单路输入源配置运行", "info");
+      } else if (!multiInputSources.some((item) => item.enableAudio)) {
+        document.getElementById("sourceAudioEnabled").value = "false";
       }
+    };
+    document.getElementById("sourceAudioEnabled").onchange = () => {
+      if (!asBool("multiInputEnabled")) return;
+      const enable = asBool("sourceAudioEnabled");
+      if (!enable) {
+        for (const item of multiInputSources) {
+          item.enableAudio = false;
+        }
+      } else if (multiInputSources.length > 0 && !multiInputSources.some((item) => item.enableAudio)) {
+        multiInputSources[0].enableAudio = true;
+      }
+      renderMultiInputList();
     };
 
     bindAction("load", loadSetting, "box", { successToast: false });
@@ -1304,6 +1373,7 @@
         return { code: 0, message: "cancelled" };
       }
       multiInputSources = [];
+      document.getElementById("sourceAudioEnabled").value = "false";
       renderMultiInputList();
       renderMultiInputCanvas();
       showJSON("box", { code: 0, message: "mosaic sources cleared" });

@@ -82,16 +82,17 @@ func NormalizeInputType(newType string, legacyType int) InputType {
 }
 
 type MultiInputSource struct {
-	URL        string  `json:"url"`
-	Title      string  `json:"title"`
-	Primary    bool    `json:"primary"`
-	SourceType string  `json:"sourceType"`
-	MaterialID int64   `json:"materialId"`
-	X          float64 `json:"x"`
-	Y          float64 `json:"y"`
-	W          float64 `json:"w"`
-	H          float64 `json:"h"`
-	Z          int     `json:"z"`
+	URL         string  `json:"url"`
+	Title       string  `json:"title"`
+	Primary     bool    `json:"primary"`
+	EnableAudio bool    `json:"enableAudio"`
+	SourceType  string  `json:"sourceType"`
+	MaterialID  int64   `json:"materialId"`
+	X           float64 `json:"x"`
+	Y           float64 `json:"y"`
+	W           float64 `json:"w"`
+	H           float64 `json:"h"`
+	Z           int     `json:"z"`
 }
 
 // Result-compatible page payload.

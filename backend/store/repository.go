@@ -1819,6 +1819,7 @@ func normalizeMultiInputMeta(items []MultiInputSource, fallbackURLs []string, ma
 	seen := map[string]struct{}{}
 	result := make([]MultiInputSource, 0, len(items))
 	primaryFound := false
+	audioFound := false
 	appendItem := func(item MultiInputSource) {
 		urlValue := strings.TrimSpace(item.URL)
 		if urlValue == "" {
@@ -1868,6 +1869,11 @@ func normalizeMultiInputMeta(items []MultiInputSource, fallbackURLs []string, ma
 			primaryFound = true
 		} else {
 			item.Primary = false
+		}
+		if item.EnableAudio && !audioFound {
+			audioFound = true
+		} else {
+			item.EnableAudio = false
 		}
 		result = append(result, item)
 	}
