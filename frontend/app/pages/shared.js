@@ -261,11 +261,19 @@
     } catch {
       payload = { code: -1, message: text || "Non-JSON response" };
     }
+    const hasBusinessCode = payload && Object.prototype.hasOwnProperty.call(payload, "code");
+    const businessCode = hasBusinessCode ? Number(payload.code) : 0;
     if (response.status === 401 || Number(payload.code || 0) === -401) {
       if (!opts.noAuthRedirect && !isAdminLoginPage()) {
         clearAuth();
         goAdminLogin();
       }
+    }
+    if (response.ok && hasBusinessCode && Number.isFinite(businessCode) && businessCode < 0) {
+      const err = new Error(payload.message || `API business error ${businessCode}`);
+      err.payload = payload;
+      err.status = response.status;
+      throw err;
     }
     if (!response.ok) {
       const err = new Error(payload.message || `HTTP ${response.status}`);

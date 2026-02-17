@@ -45,6 +45,22 @@
           </select>
         </label>
       </div>
+      <div class="grid two">
+        <label>ONVIF Endpoint（可手动填写）
+          <input id="onvifQuickEndpoint" placeholder="http://ip/onvif/device_service" />
+        </label>
+        <label>ONVIF 用户名
+          <input id="onvifQuickUsername" placeholder="admin" />
+        </label>
+      </div>
+      <div class="grid two">
+        <label>ONVIF 密码
+          <input id="onvifQuickPassword" type="text" placeholder="123456" />
+        </label>
+        <label>提示
+          <input value="先填账号密码再读取 Profiles，可自动回填 RTSP 到“绑定 RTSP 地址”" readonly />
+        </label>
+      </div>
       <div class="actions">
         <button id="btnDiscoverOnvif">扫描 ONVIF（局域网）</button>
         <button id="btnProbeOnvifProfiles">读取 ONVIF Profiles</button>
@@ -248,7 +264,7 @@
 
   <script src="/app/pages/shared.js"></script>
   <script>
-    const { initPage, requestJSON, showJSON, bindAction, showConfirm, statusBadge, markFields, setPanelVisible } = window.GoverShared;
+    const { initPage, requestJSON, showJSON, bindAction, showConfirm, statusBadge, markFields, setPanelVisible, showToast } = window.GoverShared;
     initPage({ active: "cameras" });
 
     const rowsCache = new Map();
@@ -270,6 +286,33 @@
 
     function textValue(id) {
       return String(document.getElementById(id).value || "").trim();
+    }
+
+    function syncQuickToOnvifForm(preferQuick) {
+      const quickEndpoint = textValue("onvifQuickEndpoint");
+      const quickUsername = textValue("onvifQuickUsername");
+      const quickPassword = String(document.getElementById("onvifQuickPassword").value || "");
+      const endpointInput = document.getElementById("cameraOnvifEndpoint");
+      const usernameInput = document.getElementById("cameraOnvifUsername");
+      const passwordInput = document.getElementById("cameraOnvifPassword");
+      if (quickEndpoint && (preferQuick || !textValue("cameraOnvifEndpoint"))) {
+        endpointInput.value = quickEndpoint;
+      }
+      if (quickUsername && (preferQuick || !textValue("cameraOnvifUsername"))) {
+        usernameInput.value = quickUsername;
+      }
+      if (quickPassword && (preferQuick || !(passwordInput.value || ""))) {
+        passwordInput.value = quickPassword;
+      }
+    }
+
+    function syncOnvifFormToQuick() {
+      const endpoint = textValue("cameraOnvifEndpoint");
+      const username = textValue("cameraOnvifUsername");
+      const password = String(document.getElementById("cameraOnvifPassword").value || "");
+      if (endpoint) document.getElementById("onvifQuickEndpoint").value = endpoint;
+      if (username) document.getElementById("onvifQuickUsername").value = username;
+      if (password) document.getElementById("onvifQuickPassword").value = password;
     }
 
     function sourceTypeOf(item) {
@@ -323,6 +366,7 @@
       const onvifRtspInput = document.getElementById("cameraOnvifRtspUrl");
       onvifRtspInput.value = data.rtspUrl || "";
       onvifRtspInput.dataset.autoFilled = "0";
+      syncOnvifFormToQuick();
       document.getElementById("cameraUsbName").value = data.usbDeviceName || "";
       document.getElementById("cameraUsbResolution").value = data.usbDeviceResolution || "1280x720";
       document.getElementById("cameraUsbFps").value = String(data.usbDeviceFramerate || 30);
@@ -332,6 +376,7 @@
     }
 
     function collectPayload() {
+      syncQuickToOnvifForm(false);
       const id = numberValue("cameraId", 0);
       return {
         id: id > 0 ? id : 0,
@@ -595,8 +640,7 @@
     }
 
     function scheduleOnvifAutoProbe() {
-      if (textValue("cameraType") !== "onvif") return;
-      const endpoint = textValue("cameraOnvifEndpoint");
+      const endpoint = textValue("cameraOnvifEndpoint") || textValue("onvifQuickEndpoint");
       if (!endpoint) return;
       if (onvifAutoProbeTimer) {
         clearTimeout(onvifAutoProbeTimer);
@@ -607,10 +651,11 @@
     }
 
     async function probeOnvifProfiles(silent) {
+      syncQuickToOnvifForm(false);
       const payload = {
-        endpoint: textValue("cameraOnvifEndpoint"),
-        username: textValue("cameraOnvifUsername"),
-        password: document.getElementById("cameraOnvifPassword").value || ""
+        endpoint: textValue("cameraOnvifEndpoint") || textValue("onvifQuickEndpoint"),
+        username: textValue("cameraOnvifUsername") || textValue("onvifQuickUsername"),
+        password: (document.getElementById("cameraOnvifPassword").value || "") || (document.getElementById("onvifQuickPassword").value || "")
       };
       if (!payload.endpoint) {
         if (silent) return { code: 0, message: "skip-empty-endpoint", data: [] };
@@ -631,6 +676,12 @@
       }
       const items = (result && result.data) || [];
       applyOnvifProfileResult(items);
+      if (!silent) {
+        const hasRTSP = Array.isArray(items) && items.some((item) => String((item && item.rtspUrl) || "").trim() !== "");
+        if (!hasRTSP) {
+          showToast("已读取 ONVIF Profiles，但设备拒绝 GetStreamUri；请确认账号权限，或手动填写 RTSP 地址。", "info");
+        }
+      }
       return result;
     }
 
@@ -652,12 +703,18 @@
     }
 
     document.getElementById("cameraType").onchange = switchTypePanels;
-    document.getElementById("cameraOnvifEndpoint").onchange = scheduleOnvifAutoProbe;
-    document.getElementById("cameraOnvifUsername").onchange = scheduleOnvifAutoProbe;
-    document.getElementById("cameraOnvifPassword").onchange = scheduleOnvifAutoProbe;
-    document.getElementById("cameraOnvifEndpoint").oninput = scheduleOnvifAutoProbe;
-    document.getElementById("cameraOnvifUsername").oninput = scheduleOnvifAutoProbe;
-    document.getElementById("cameraOnvifPassword").oninput = scheduleOnvifAutoProbe;
+    document.getElementById("onvifQuickEndpoint").onchange = () => { syncQuickToOnvifForm(true); scheduleOnvifAutoProbe(); };
+    document.getElementById("onvifQuickUsername").onchange = () => { syncQuickToOnvifForm(true); scheduleOnvifAutoProbe(); };
+    document.getElementById("onvifQuickPassword").onchange = () => { syncQuickToOnvifForm(true); scheduleOnvifAutoProbe(); };
+    document.getElementById("onvifQuickEndpoint").oninput = () => { syncQuickToOnvifForm(true); scheduleOnvifAutoProbe(); };
+    document.getElementById("onvifQuickUsername").oninput = () => { syncQuickToOnvifForm(true); scheduleOnvifAutoProbe(); };
+    document.getElementById("onvifQuickPassword").oninput = () => { syncQuickToOnvifForm(true); scheduleOnvifAutoProbe(); };
+    document.getElementById("cameraOnvifEndpoint").onchange = () => { syncOnvifFormToQuick(); scheduleOnvifAutoProbe(); };
+    document.getElementById("cameraOnvifUsername").onchange = () => { syncOnvifFormToQuick(); scheduleOnvifAutoProbe(); };
+    document.getElementById("cameraOnvifPassword").onchange = () => { syncOnvifFormToQuick(); scheduleOnvifAutoProbe(); };
+    document.getElementById("cameraOnvifEndpoint").oninput = () => { syncOnvifFormToQuick(); scheduleOnvifAutoProbe(); };
+    document.getElementById("cameraOnvifUsername").oninput = () => { syncOnvifFormToQuick(); scheduleOnvifAutoProbe(); };
+    document.getElementById("cameraOnvifPassword").oninput = () => { syncOnvifFormToQuick(); scheduleOnvifAutoProbe(); };
     document.getElementById("cameraOnvifRtspUrl").oninput = () => {
       document.getElementById("cameraOnvifRtspUrl").dataset.autoFilled = "0";
     };
@@ -666,6 +723,7 @@
       if (!endpoint) return;
       document.getElementById("cameraType").value = "onvif";
       document.getElementById("cameraOnvifEndpoint").value = endpoint;
+      document.getElementById("onvifQuickEndpoint").value = endpoint;
       if (!textValue("cameraName")) {
         document.getElementById("cameraName").value = "ONVIF Camera";
       }

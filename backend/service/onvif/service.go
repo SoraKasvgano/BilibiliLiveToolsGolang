@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/md5"
 	cryptorand "crypto/rand"
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/xml"
 	"errors"
@@ -1053,30 +1055,149 @@ func (s *Service) callSOAP(ctx context.Context, endpoint string, action string, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	envelope := `<?xml version="1.0" encoding="UTF-8"?>` +
-		`<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">` +
-		`<s:Body>` + body + `</s:Body></s:Envelope>`
+	envelope := buildSOAPEnvelope(body, "")
 
 	result, resp, err := s.doSOAPRequest(ctx, endpoint, action, envelope, "")
 	if err == nil {
 		return result, nil
 	}
-	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+	lastErr := err
+	authHeader := ""
+	if resp != nil && resp.StatusCode == http.StatusUnauthorized {
+		challenge := resp.Header.Get("WWW-Authenticate")
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(challenge)), "digest") {
+			var authErr error
+			authHeader, authErr = buildDigestHeader(challenge, username, password, http.MethodPost, endpoint)
+			if authErr != nil {
+				return "", authErr
+			}
+			result, resp, err = s.doSOAPRequest(ctx, endpoint, action, envelope, authHeader)
+			if err == nil {
+				return result, nil
+			}
+			lastErr = err
+		}
+	}
+
+	if shouldRetryWSSecurity(resp, lastErr, username) {
+		result, wsErr := s.callSOAPWithWSSecurity(ctx, endpoint, action, body, username, password, authHeader)
+		if wsErr == nil {
+			return result, nil
+		}
+		return "", fmt.Errorf("%w; ws-security retry failed: %v", lastErr, wsErr)
+	}
+	return "", lastErr
+}
+
+func buildSOAPEnvelope(body string, header string) string {
+	envelope := `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">`
+	if strings.TrimSpace(header) != "" {
+		envelope += `<s:Header>` + header + `</s:Header>`
+	}
+	envelope += `<s:Body>` + body + `</s:Body></s:Envelope>`
+	return envelope
+}
+
+func (s *Service) callSOAPWithWSSecurity(ctx context.Context, endpoint string, action string, body string, username string, password string, authorization string) (string, error) {
+	if strings.TrimSpace(username) == "" {
+		return "", errors.New("onvif ws-security username is required")
+	}
+	securityDigest, err := buildWSSecurityHeader(username, password, true)
+	if err != nil {
 		return "", err
 	}
-	challenge := resp.Header.Get("WWW-Authenticate")
-	if !strings.HasPrefix(strings.ToLower(challenge), "digest") {
+	envelope := buildSOAPEnvelope(body, securityDigest)
+	result, resp, err := s.doSOAPRequest(ctx, endpoint, action, envelope, authorization)
+	if err == nil {
+		return result, nil
+	}
+	if !isAuthLikeSOAPError(resp, err) {
 		return "", err
 	}
-	authHeader, authErr := buildDigestHeader(challenge, username, password, http.MethodPost, endpoint)
-	if authErr != nil {
-		return "", authErr
+	securityText, textErr := buildWSSecurityHeader(username, password, false)
+	if textErr != nil {
+		return "", textErr
 	}
-	result, _, err = s.doSOAPRequest(ctx, endpoint, action, envelope, authHeader)
+	envelope = buildSOAPEnvelope(body, securityText)
+	result, _, err = s.doSOAPRequest(ctx, endpoint, action, envelope, authorization)
 	if err != nil {
 		return "", err
 	}
 	return result, nil
+}
+
+func shouldRetryWSSecurity(resp *http.Response, err error, username string) bool {
+	if strings.TrimSpace(username) == "" {
+		return false
+	}
+	return isAuthLikeSOAPError(resp, err)
+}
+
+func isAuthLikeSOAPError(resp *http.Response, err error) bool {
+	if resp != nil {
+		switch resp.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return true
+		case http.StatusBadRequest:
+			// Some ONVIF devices return SOAP Fault (ter:NotAuthorized) with HTTP 400.
+			if err != nil {
+				msg := strings.ToLower(err.Error())
+				if strings.Contains(msg, "notauthorized") ||
+					strings.Contains(msg, "authority failure") ||
+					strings.Contains(msg, "unauthorized") ||
+					strings.Contains(msg, "wsse") ||
+					strings.Contains(msg, "security") {
+					return true
+				}
+			}
+		}
+	}
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "notauthorized") ||
+		strings.Contains(msg, "authority failure") ||
+		strings.Contains(msg, "unauthorized")
+}
+
+func buildWSSecurityHeader(username string, password string, useDigest bool) (string, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return "", errors.New("onvif ws-security username is required")
+	}
+	passwordValue := password
+	passwordType := "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText"
+	nonceValue := ""
+	created := time.Now().UTC().Format(time.RFC3339)
+	noncePart := ""
+	createdPart := ""
+
+	if useDigest {
+		passwordType = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest"
+		nonceBytes := make([]byte, 16)
+		if _, err := cryptorand.Read(nonceBytes); err != nil {
+			return "", err
+		}
+		nonceValue = base64.StdEncoding.EncodeToString(nonceBytes)
+		hash := sha1.New()
+		hash.Write(nonceBytes)
+		hash.Write([]byte(created))
+		hash.Write([]byte(password))
+		passwordValue = base64.StdEncoding.EncodeToString(hash.Sum(nil))
+		noncePart = `<wsse:Nonce EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary">` + xmlEscape(nonceValue) + `</wsse:Nonce>`
+		createdPart = `<wsu:Created>` + xmlEscape(created) + `</wsu:Created>`
+	}
+
+	return `<wsse:Security s:mustUnderstand="1" ` +
+		`xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" ` +
+		`xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">` +
+		`<wsse:UsernameToken>` +
+		`<wsse:Username>` + xmlEscape(username) + `</wsse:Username>` +
+		`<wsse:Password Type="` + passwordType + `">` + xmlEscape(passwordValue) + `</wsse:Password>` +
+		noncePart + createdPart +
+		`</wsse:UsernameToken></wsse:Security>`, nil
 }
 
 func (s *Service) doSOAPRequest(ctx context.Context, endpoint string, action string, envelope string, authorization string) (string, *http.Response, error) {
