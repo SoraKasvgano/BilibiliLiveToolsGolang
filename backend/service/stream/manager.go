@@ -27,11 +27,12 @@ type Manager struct {
 	logBuffer int
 	debugLogs bool
 
-	mu      sync.RWMutex
-	cancel  context.CancelFunc
-	cmd     *exec.Cmd
-	running bool
-	logs    []store.FFmpegLogItem
+	mu            sync.RWMutex
+	cancel        context.CancelFunc
+	cmd           *exec.Cmd
+	running       bool
+	logs          []store.FFmpegLogItem
+	hevcHintShown bool
 }
 
 func NewManager(storeDB *store.Store, ff *ffsvc.Service, bili bilibili.Service, mediaDir string, logBuffer int, debugLogs bool) *Manager {
@@ -81,6 +82,7 @@ func (m *Manager) Start(ctx context.Context, startup bool) error {
 	m.running = true
 	m.status = store.PushStatusStarting
 	m.logs = m.logs[:0]
+	m.hevcHintShown = false
 	m.mu.Unlock()
 
 	go m.runLoop(runCtx)
@@ -233,11 +235,29 @@ func (m *Manager) collectPipe(level string, reader io.Reader) {
 		if line == "" {
 			continue
 		}
-		m.addLog(level, line)
+		m.addLog(classifyFFmpegLogLevel(level, line), line)
+		maybeHintHEVCSource(m, line)
 	}
 	if err := scanner.Err(); err != nil {
 		m.addLog("Error", "ffmpeg log scanner error: "+err.Error())
 	}
+}
+
+func maybeHintHEVCSource(manager *Manager, line string) {
+	lower := strings.ToLower(strings.TrimSpace(line))
+	if !strings.Contains(lower, "video: hevc") {
+		return
+	}
+	manager.mu.Lock()
+	already := manager.hevcHintShown
+	if !already {
+		manager.hevcHintShown = true
+	}
+	manager.mu.Unlock()
+	if already {
+		return
+	}
+	manager.addLog("Warn", "detected HEVC input stream; for best RTSP stability set camera encode to H264 and keyframe interval to 1s")
 }
 
 func splitByCRLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
@@ -378,6 +398,10 @@ func (m *Manager) recentFailureSummary() string {
 		if looksLikeFFmpegCommandLine(lower) {
 			continue
 		}
+		if strings.Contains(lower, "could not find ref with poc") {
+			// This HEVC warning can be transient (usually first GOP) and doesn't necessarily break streaming.
+			continue
+		}
 		matched := false
 		for _, keyword := range keywords {
 			if strings.Contains(lower, keyword) {
@@ -432,4 +456,55 @@ func looksLikeFFmpegCommandLine(lowerText string) bool {
 		return true
 	}
 	return false
+}
+
+func classifyFFmpegLogLevel(defaultLevel string, message string) string {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return defaultLevel
+	}
+	if strings.EqualFold(defaultLevel, "Info") {
+		return "Info"
+	}
+
+	// Stderr includes both progress/info and actual errors.
+	infoPrefixes := []string{
+		"input #", "output #", "metadata:", "duration:", "stream #",
+		"stream mapping:", "press [q] to stop", "side data:",
+	}
+	for _, prefix := range infoPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return "Info"
+		}
+	}
+	if strings.HasPrefix(lower, "frame=") {
+		return "Info"
+	}
+	if isFFmpegBannerLine(lower) {
+		return "Info"
+	}
+
+	// Common noisy HEVC decode warning; keep visible but not as hard error.
+	if strings.Contains(lower, "could not find ref with poc") {
+		return "Warn"
+	}
+
+	if strings.Contains(lower, "warning") ||
+		strings.Contains(lower, "deprecated") ||
+		strings.Contains(lower, "non-monotonous") ||
+		strings.Contains(lower, "past duration too large") {
+		return "Warn"
+	}
+
+	errorKeywords := []string{
+		"error", "failed", "invalid", "not found",
+		"permission denied", "connection refused", "no such file",
+		"option ", "unable to", "broken pipe", "i/o error",
+	}
+	for _, keyword := range errorKeywords {
+		if strings.Contains(lower, keyword) {
+			return "Error"
+		}
+	}
+	return defaultLevel
 }

@@ -76,17 +76,21 @@ func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 				targetQuality = store.OutputQualityMedium
 			}
 			quality := qualityPreset(targetQuality)
-			bitrate := quality.Bitrate
-			bufSize := quality.BufSize
+			bitrateKbps := quality.BitrateKbps
 			if customBitrate := normalizeBitrateKbps(ctx.Setting.OutputBitrateKbps); customBitrate > 0 {
-				bitrate = fmt.Sprintf("%dk", customBitrate)
-				bufSize = fmt.Sprintf("%dk", customBitrate*2)
+				bitrateKbps = customBitrate
+			} else {
+				bitrateKbps = clampPresetBitrateForResolution(bitrateKbps, ctx.Setting.OutputResolution)
 			}
+			bitrate := fmt.Sprintf("%dk", bitrateKbps)
+			bufSize := fmt.Sprintf("%dk", bitrateKbps*2)
 			args = append(args,
 				"-vcodec", codec,
 				"-pix_fmt", "yuv420p",
 				"-r", "30",
 				"-g", "30",
+				"-keyint_min", "30",
+				"-sc_threshold", "0",
 				"-b:v", bitrate,
 				"-maxrate", bitrate,
 				"-bufsize", bufSize,
@@ -287,21 +291,41 @@ func buildNormalCommand(ctx BuildContext) (string, []string, error) {
 }
 
 type quality struct {
-	Bitrate string
-	BufSize string
-	Preset  string
-	CRF     string
+	BitrateKbps int
+	Preset      string
+	CRF         string
 }
 
 func qualityPreset(level store.OutputQuality) quality {
 	switch level {
 	case store.OutputQualityHigh:
-		return quality{Bitrate: "8000k", BufSize: "16000k", Preset: "fast", CRF: "23"}
+		return quality{BitrateKbps: 8000, Preset: "fast", CRF: "23"}
 	case store.OutputQualityLow:
-		return quality{Bitrate: "2000k", BufSize: "4000k", Preset: "ultrafast", CRF: "33"}
+		return quality{BitrateKbps: 2000, Preset: "ultrafast", CRF: "33"}
 	default:
-		return quality{Bitrate: "4000k", BufSize: "8000k", Preset: "veryfast", CRF: "28"}
+		return quality{BitrateKbps: 4000, Preset: "veryfast", CRF: "28"}
 	}
+}
+
+func clampPresetBitrateForResolution(bitrateKbps int, outputResolution string) int {
+	if bitrateKbps <= 0 {
+		return 0
+	}
+	width, height := parseOutputResolution(outputResolution)
+	pixels := width * height
+	maxKbps := 12000
+	switch {
+	case pixels <= 640*360:
+		maxKbps = 2000
+	case pixels <= 1280*720:
+		maxKbps = 4500
+	case pixels <= 1920*1080:
+		maxKbps = 8000
+	}
+	if bitrateKbps > maxKbps {
+		return maxKbps
+	}
+	return bitrateKbps
 }
 
 func normalizeBitrateKbps(value int) int {
@@ -827,7 +851,7 @@ func appendRTSPInputArgs(args []string, sourceURL string) []string {
 		"-thread_queue_size", "1024",
 		"-analyzeduration", "10000000",
 		"-probesize", "5000000",
-		"-fflags", "+genpts",
+		"-fflags", "+genpts+discardcorrupt",
 		"-i", sourceURL,
 	)
 	return args
