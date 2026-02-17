@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
+	"time"
 
 	"bilibililivetools/gover/backend/httpapi"
 	"bilibililivetools/gover/backend/router"
@@ -48,6 +50,7 @@ func (m *authModule) login(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, -1, err.Error(), http.StatusOK)
 		return
 	}
+	setAdminSessionCookie(w, result.Token, result.ExpiresAt)
 	httpapi.OK(w, result)
 }
 
@@ -60,7 +63,44 @@ func (m *authModule) logout(w http.ResponseWriter, r *http.Request) {
 	if token != "" {
 		_ = m.deps.Auth.Logout(r.Context(), token)
 	}
+	clearAdminSessionCookie(w)
 	httpapi.OKMessage(w, "logged out")
+}
+
+func setAdminSessionCookie(w http.ResponseWriter, token string, expiresAtRaw string) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return
+	}
+	expiresAt := time.Now().UTC().Add(24 * time.Hour)
+	if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(expiresAtRaw)); err == nil {
+		expiresAt = parsed
+	}
+	maxAge := int(time.Until(expiresAt).Seconds())
+	if maxAge <= 0 {
+		maxAge = 24 * 60 * 60
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "gover_session",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  expiresAt,
+		MaxAge:   maxAge,
+	})
+}
+
+func clearAdminSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "gover_session",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  time.Unix(0, 0).UTC(),
+		MaxAge:   -1,
+	})
 }
 
 func (m *authModule) status(w http.ResponseWriter, r *http.Request) {

@@ -6,6 +6,7 @@ import (
 	"math"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -370,7 +371,9 @@ func appendMosaicInputArgs(ctx BuildContext, args *[]string, hasAudio *bool) err
 	mode := strings.ToLower(strings.TrimSpace(ctx.Setting.MultiInputLayout))
 	filterComplex := ""
 	var err error
-	if mode == "focus" || strings.HasPrefix(mode, "focus-") {
+	if mode == "canvas" || mode == "free" || mode == "custom" {
+		filterComplex, err = buildCanvasMosaicFilter(sources, outW, outH)
+	} else if mode == "focus" || strings.HasPrefix(mode, "focus-") {
 		filterComplex, err = buildFocusMosaicFilter(sources, outW, outH)
 	} else {
 		cols, rows := parseMosaicLayout(mode, len(sources))
@@ -461,6 +464,165 @@ func buildFocusMosaicFilter(sources []store.MultiInputSource, outW int, outH int
 	filters = append(filters, "[base][vmain]overlay=0:0[stage1]")
 	filters = append(filters, fmt.Sprintf("[stage1][vright]overlay=%d:0[vout]", mainW))
 	return strings.Join(filters, ";"), nil
+}
+
+type canvasMosaicNode struct {
+	InputIndex int
+	Label      string
+	X          int
+	Y          int
+	W          int
+	H          int
+	Z          int
+	Title      string
+}
+
+func buildCanvasMosaicFilter(sources []store.MultiInputSource, outW int, outH int) (string, error) {
+	if len(sources) < 2 {
+		return "", errors.New("canvas mosaic requires at least 2 sources")
+	}
+	defaultRects := defaultCanvasRects(len(sources))
+	nodes := make([]canvasMosaicNode, 0, len(sources))
+	for idx, source := range sources {
+		rect := defaultRects[idx]
+		hasCustomRect := source.W > 0 || source.H > 0
+		xNorm := rect.X
+		yNorm := rect.Y
+		wNorm := rect.W
+		hNorm := rect.H
+		if hasCustomRect {
+			xNorm = clampCanvasNumber(source.X, rect.X, 0, 1)
+			yNorm = clampCanvasNumber(source.Y, rect.Y, 0, 1)
+			wNorm = clampCanvasNumber(source.W, rect.W, 0.08, 1)
+			hNorm = clampCanvasNumber(source.H, rect.H, 0.08, 1)
+		}
+		if xNorm+wNorm > 1 {
+			xNorm = 1 - wNorm
+		}
+		if yNorm+hNorm > 1 {
+			yNorm = 1 - hNorm
+		}
+		if xNorm < 0 {
+			xNorm = 0
+		}
+		if yNorm < 0 {
+			yNorm = 0
+		}
+
+		node := canvasMosaicNode{
+			InputIndex: idx,
+			Label:      fmt.Sprintf("vc%d", idx),
+			X:          int(math.Round(float64(outW) * xNorm)),
+			Y:          int(math.Round(float64(outH) * yNorm)),
+			W:          int(math.Round(float64(outW) * wNorm)),
+			H:          int(math.Round(float64(outH) * hNorm)),
+			Z:          source.Z,
+			Title:      source.Title,
+		}
+		if node.W < 64 {
+			node.W = 64
+		}
+		if node.H < 36 {
+			node.H = 36
+		}
+		if node.X+node.W > outW {
+			node.X = outW - node.W
+		}
+		if node.Y+node.H > outH {
+			node.Y = outH - node.H
+		}
+		if node.X < 0 {
+			node.X = 0
+		}
+		if node.Y < 0 {
+			node.Y = 0
+		}
+		nodes = append(nodes, node)
+	}
+	sort.SliceStable(nodes, func(i, j int) bool {
+		if nodes[i].Z == nodes[j].Z {
+			return nodes[i].InputIndex < nodes[j].InputIndex
+		}
+		return nodes[i].Z < nodes[j].Z
+	})
+
+	filters := make([]string, 0, len(nodes)*2+3)
+	for _, node := range nodes {
+		filters = append(filters, buildMosaicInputFilter(node.InputIndex, node.Label, node.W, node.H, node.Title))
+	}
+	filters = append(filters, fmt.Sprintf("color=c=black:s=%dx%d[canvas0]", outW, outH))
+	previous := "canvas0"
+	for idx, node := range nodes {
+		current := fmt.Sprintf("canvas%d", idx+1)
+		filters = append(filters, fmt.Sprintf("[%s][%s]overlay=%d:%d[%s]", previous, node.Label, node.X, node.Y, current))
+		previous = current
+	}
+	filters = append(filters, fmt.Sprintf("[%s]copy[vout]", previous))
+	return strings.Join(filters, ";"), nil
+}
+
+type canvasRect struct {
+	X float64
+	Y float64
+	W float64
+	H float64
+}
+
+func defaultCanvasRects(sourceCount int) []canvasRect {
+	if sourceCount <= 0 {
+		return []canvasRect{}
+	}
+	cols, rows := parseMosaicLayout("", sourceCount)
+	if cols <= 0 {
+		cols = 1
+	}
+	if rows <= 0 {
+		rows = 1
+	}
+	cellW := 1.0 / float64(cols)
+	cellH := 1.0 / float64(rows)
+	marginX := math.Min(0.01, cellW*0.08)
+	marginY := math.Min(0.01, cellH*0.08)
+	items := make([]canvasRect, 0, sourceCount)
+	for idx := 0; idx < sourceCount; idx++ {
+		col := idx % cols
+		row := idx / cols
+		x := float64(col)*cellW + marginX
+		y := float64(row)*cellH + marginY
+		w := cellW - marginX*2
+		h := cellH - marginY*2
+		if w < 0.08 {
+			w = 0.08
+		}
+		if h < 0.08 {
+			h = 0.08
+		}
+		if x+w > 1 {
+			x = 1 - w
+		}
+		if y+h > 1 {
+			y = 1 - h
+		}
+		items = append(items, canvasRect{X: x, Y: y, W: w, H: h})
+	}
+	return items
+}
+
+func clampCanvasNumber(value float64, fallback float64, min float64, max float64) float64 {
+	if !isFiniteNumber(value) {
+		value = fallback
+	}
+	if value < min {
+		value = min
+	}
+	if value > max {
+		value = max
+	}
+	return value
+}
+
+func isFiniteNumber(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 func buildMosaicInputFilter(index int, label string, width int, height int, title string) string {

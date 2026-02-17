@@ -252,6 +252,9 @@
     }
     const requestInit = { ...opts, headers };
     delete requestInit.noAuthRedirect;
+    if (!requestInit.credentials) {
+      requestInit.credentials = "same-origin";
+    }
 
     const response = await fetch(path, requestInit);
     const text = await response.text();

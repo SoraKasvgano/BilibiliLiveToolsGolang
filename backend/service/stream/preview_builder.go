@@ -151,7 +151,9 @@ func appendMosaicPreviewInputArgs(ctx BuildContext, args *[]string) error {
 	mode := strings.ToLower(strings.TrimSpace(ctx.Setting.MultiInputLayout))
 	filterComplex := ""
 	var err error
-	if mode == "focus" || strings.HasPrefix(mode, "focus-") {
+	if mode == "canvas" || mode == "free" || mode == "custom" {
+		filterComplex, err = buildCanvasMosaicFilter(sources, outW, outH)
+	} else if mode == "focus" || strings.HasPrefix(mode, "focus-") {
 		filterComplex, err = buildFocusMosaicFilter(sources, outW, outH)
 	} else {
 		cols, rows := parseMosaicLayout(mode, len(sources))

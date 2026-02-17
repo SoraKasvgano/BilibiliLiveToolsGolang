@@ -313,6 +313,125 @@ button:disabled {
   display: none;
 }
 
+.mosaic-list {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.mosaic-item {
+  border: 1px solid #dbe1ee;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fafc;
+  display: grid;
+  gap: 8px;
+}
+
+.mosaic-item.drag-over {
+  border-color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.mosaic-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mosaic-item-handle {
+  cursor: move;
+  user-select: none;
+  color: #334155;
+  font-weight: 700;
+}
+
+.mosaic-item-title {
+  flex: 1;
+}
+
+.mosaic-item-url {
+  font-size: 12px;
+  color: #475569;
+  word-break: break-all;
+}
+
+.mosaic-item-empty {
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.mosaic-canvas {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 240px;
+  border: 1px solid #d7dfeb;
+  border-radius: 10px;
+  background:
+    linear-gradient(0deg, rgba(203, 213, 225, 0.32) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(203, 213, 225, 0.32) 1px, transparent 1px),
+    #0f172a;
+  background-size: 32px 32px;
+  overflow: hidden;
+}
+
+.mosaic-canvas-item {
+  position: absolute;
+  border: 2px solid #93c5fd;
+  border-radius: 8px;
+  background: rgba(30, 41, 59, 0.72);
+  color: #e2e8f0;
+  user-select: none;
+  overflow: hidden;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.24);
+}
+
+.mosaic-canvas-item.primary {
+  border-color: #34d399;
+}
+
+.mosaic-canvas-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 6px;
+  background: rgba(15, 23, 42, 0.78);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+  cursor: move;
+  font-size: 12px;
+}
+
+.mosaic-canvas-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mosaic-canvas-body {
+  height: calc(100% - 28px);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.mosaic-canvas-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #60a5fa;
+  border: 1px solid #dbeafe;
+  cursor: nwse-resize;
+}
+
 .table-wrap {
   margin-top: 10px;
   overflow: auto;

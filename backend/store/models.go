@@ -82,11 +82,16 @@ func NormalizeInputType(newType string, legacyType int) InputType {
 }
 
 type MultiInputSource struct {
-	URL        string `json:"url"`
-	Title      string `json:"title"`
-	Primary    bool   `json:"primary"`
-	SourceType string `json:"sourceType"`
-	MaterialID int64  `json:"materialId"`
+	URL        string  `json:"url"`
+	Title      string  `json:"title"`
+	Primary    bool    `json:"primary"`
+	SourceType string  `json:"sourceType"`
+	MaterialID int64   `json:"materialId"`
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	W          float64 `json:"w"`
+	H          float64 `json:"h"`
+	Z          int     `json:"z"`
 }
 
 // Result-compatible page payload.
@@ -568,22 +573,22 @@ const (
 )
 
 type GB28181Device struct {
-	ID              int64              `json:"id"`
-	DeviceID        string             `json:"deviceId"`
-	Name            string             `json:"name"`
-	AuthPassword    string             `json:"authPassword"`
-	Transport       string             `json:"transport"`
-	RemoteAddr      string             `json:"remoteAddr"`
+	ID              int64               `json:"id"`
+	DeviceID        string              `json:"deviceId"`
+	Name            string              `json:"name"`
+	AuthPassword    string              `json:"authPassword"`
+	Transport       string              `json:"transport"`
+	RemoteAddr      string              `json:"remoteAddr"`
 	Status          GB28181DeviceStatus `json:"status"`
-	Expires         int                `json:"expires"`
-	LastRegisterAt  *time.Time         `json:"lastRegisterAt,omitempty"`
-	LastKeepaliveAt *time.Time         `json:"lastKeepaliveAt,omitempty"`
-	Manufacturer    string             `json:"manufacturer"`
-	Model           string             `json:"model"`
-	Firmware        string             `json:"firmware"`
-	RawPayload      string             `json:"rawPayload"`
-	CreatedAt       time.Time          `json:"createdAt"`
-	UpdatedAt       time.Time          `json:"updatedAt"`
+	Expires         int                 `json:"expires"`
+	LastRegisterAt  *time.Time          `json:"lastRegisterAt,omitempty"`
+	LastKeepaliveAt *time.Time          `json:"lastKeepaliveAt,omitempty"`
+	Manufacturer    string              `json:"manufacturer"`
+	Model           string              `json:"model"`
+	Firmware        string              `json:"firmware"`
+	RawPayload      string              `json:"rawPayload"`
+	CreatedAt       time.Time           `json:"createdAt"`
+	UpdatedAt       time.Time           `json:"updatedAt"`
 }
 
 type GB28181Channel struct {
@@ -610,19 +615,19 @@ type GB28181Channel struct {
 }
 
 type GB28181Session struct {
-	ID         int64               `json:"id"`
-	DeviceRowID int64              `json:"deviceRowId"`
-	DeviceID   string              `json:"deviceId"`
-	ChannelID  string              `json:"channelId"`
-	CallID     string              `json:"callId"`
-	Branch     string              `json:"branch"`
-	StreamID   string              `json:"streamId"`
-	RemoteAddr string              `json:"remoteAddr"`
-	Status     GB28181SessionStatus `json:"status"`
-	SDPBody    string              `json:"sdpBody"`
-	CreatedAt  time.Time           `json:"createdAt"`
-	UpdatedAt  time.Time           `json:"updatedAt"`
-	EndedAt    *time.Time          `json:"endedAt,omitempty"`
+	ID          int64                `json:"id"`
+	DeviceRowID int64                `json:"deviceRowId"`
+	DeviceID    string               `json:"deviceId"`
+	ChannelID   string               `json:"channelId"`
+	CallID      string               `json:"callId"`
+	Branch      string               `json:"branch"`
+	StreamID    string               `json:"streamId"`
+	RemoteAddr  string               `json:"remoteAddr"`
+	Status      GB28181SessionStatus `json:"status"`
+	SDPBody     string               `json:"sdpBody"`
+	CreatedAt   time.Time            `json:"createdAt"`
+	UpdatedAt   time.Time            `json:"updatedAt"`
+	EndedAt     *time.Time           `json:"endedAt,omitempty"`
 }
 
 type GB28181DeviceListRequest struct {
@@ -643,18 +648,18 @@ type GB28181DeviceSaveRequest struct {
 }
 
 type GB28181RuntimeDeviceUpsertRequest struct {
-	DeviceID       string
-	Name           string
-	Transport      string
-	RemoteAddr     string
-	Expires        int
-	Manufacturer   string
-	Model          string
-	Firmware       string
-	RawPayload     string
-	LastRegisterAt *time.Time
+	DeviceID        string
+	Name            string
+	Transport       string
+	RemoteAddr      string
+	Expires         int
+	Manufacturer    string
+	Model           string
+	Firmware        string
+	RawPayload      string
+	LastRegisterAt  *time.Time
 	LastKeepaliveAt *time.Time
-	Status         GB28181DeviceStatus
+	Status          GB28181DeviceStatus
 }
 
 type GB28181ChannelUpsertRequest struct {

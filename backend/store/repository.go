@@ -1834,6 +1834,36 @@ func normalizeMultiInputMeta(items []MultiInputSource, fallbackURLs []string, ma
 		if item.MaterialID < 0 {
 			item.MaterialID = 0
 		}
+		if item.X < 0 {
+			item.X = 0
+		}
+		if item.X > 1 {
+			item.X = 1
+		}
+		if item.Y < 0 {
+			item.Y = 0
+		}
+		if item.Y > 1 {
+			item.Y = 1
+		}
+		if item.W < 0 {
+			item.W = 0
+		}
+		if item.W > 1 {
+			item.W = 1
+		}
+		if item.H < 0 {
+			item.H = 0
+		}
+		if item.H > 1 {
+			item.H = 1
+		}
+		if item.Z < 0 {
+			item.Z = 0
+		}
+		if item.Z > 999 {
+			item.Z = 999
+		}
 		if item.Primary && !primaryFound {
 			primaryFound = true
 		} else {

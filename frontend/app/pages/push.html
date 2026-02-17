@@ -176,6 +176,57 @@
           <div id="localPreviewInfo" class="soft-note">本地预览默认关闭，点击“开启本地预览”后按当前配置拉流并显示。</div>
         </div>
       </div>
+
+      <div class="soft-panel">
+        <h3>拼屏推流（同一场直播多个摄像头）</h3>
+        <div class="grid two">
+          <label>启用拼屏
+            <select id="multiInputEnabled">
+              <option value="false" selected>关闭</option>
+              <option value="true">开启</option>
+            </select>
+          </label>
+          <label>布局模式
+            <select id="multiInputLayout">
+              <option value="canvas">画布自由排布（Canvas）</option>
+              <option value="focus">主画面优先（Focus）</option>
+              <option value="2x2">2x2</option>
+              <option value="3x3">3x3</option>
+              <option value="4x4">4x4</option>
+              <option value="3x2">3x2</option>
+            </select>
+          </label>
+        </div>
+        <p class="soft-note">支持拖拽排序、每路标题叠加、主画面优先。至少 2 路源才能生效。</p>
+        <div class="grid two">
+          <label>从摄像头库添加（可多选）
+            <select id="multiInputCameraPicker" multiple size="8"></select>
+          </label>
+          <div class="soft-panel">
+            <h4>手动添加一条源</h4>
+            <label>URL
+              <input id="multiInputManualUrl" placeholder="rtsp:// / http:// / rtmp:// / 本地文件路径" />
+            </label>
+            <label>标题
+              <input id="multiInputManualTitle" placeholder="例如：主机位 / 侧机位" />
+            </label>
+            <div class="actions">
+              <button id="btnMultiInputAddManual">添加该源</button>
+            </div>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="btnMultiInputAddSelected">添加选中摄像头</button>
+          <button id="btnMultiInputAutoLayout">自动网格排布</button>
+          <button id="btnMultiInputClear">清空拼屏源</button>
+        </div>
+        <div class="soft-panel">
+          <h4>画布编辑器（拖拽/缩放）</h4>
+          <p class="soft-note">拖动画面块调整位置，拖动右下角圆点调整大小。双击画面块可设为主画面。</p>
+          <div id="multiInputCanvas" class="mosaic-canvas"></div>
+        </div>
+        <div id="multiInputList" class="mosaic-list"></div>
+      </div>
     </section>
 
     <section class="page-card">
@@ -202,11 +253,12 @@
 
   <script src="/app/pages/shared.js"></script>
   <script>
-    const { initPage, requestJSON, showJSON, bindAction, showToast, markFields, statusBadge, createPoller, setPanelVisible } = window.GoverShared;
+    const { initPage, requestJSON, showJSON, bindAction, showToast, showConfirm, markFields, statusBadge, createPoller, setPanelVisible } = window.GoverShared;
     initPage({ active: "push" });
 
     const cameraMap = new Map();
     let localPreviewRunning = false;
+    let multiInputSources = [];
 
     function asText(id) {
       return String(document.getElementById(id).value || "").trim();
@@ -372,6 +424,437 @@
       return "";
     }
 
+    function cameraToMosaicSource(item) {
+      if (!item) return null;
+      const type = String(item.sourceType || "").toLowerCase();
+      let url = "";
+      if (type === "rtsp" || type === "onvif") {
+        url = String(item.rtspUrl || "").trim();
+      } else if (type === "mjpeg") {
+        url = String(item.mjpegUrl || "").trim();
+      } else if (type === "rtmp") {
+        url = String(item.rtmpUrl || "").trim();
+      } else if (type === "gb28181") {
+        url = String(item.gbPullUrl || "").trim();
+      }
+      if (!url) {
+        return null;
+      }
+      return {
+        url,
+        title: String(item.name || cameraTypeLabel(type) || "Source").trim(),
+        primary: false,
+        sourceType: type,
+        materialId: 0,
+        x: 0,
+        y: 0,
+        w: 0,
+        h: 0,
+        z: 0,
+      };
+    }
+
+    function normalizeMultiInputSource(item) {
+      if (!item || typeof item !== "object") return null;
+      const url = String(item.url || "").trim();
+      if (!url) return null;
+      return {
+        url,
+        title: String(item.title || "").trim(),
+        primary: Boolean(item.primary),
+        sourceType: String(item.sourceType || "").trim(),
+        materialId: Number(item.materialId || 0) || 0,
+        x: Number(item.x || 0) || 0,
+        y: Number(item.y || 0) || 0,
+        w: Number(item.w || 0) || 0,
+        h: Number(item.h || 0) || 0,
+        z: Number(item.z || 0) || 0,
+      };
+    }
+
+    function ensurePrimaryMultiInputSource(items) {
+      if (!Array.isArray(items) || items.length === 0) return;
+      let primaryIndex = items.findIndex((item) => Boolean(item && item.primary));
+      if (primaryIndex < 0) primaryIndex = 0;
+      for (let i = 0; i < items.length; i++) {
+        items[i].primary = i === primaryIndex;
+      }
+    }
+
+    function clamp01(value) {
+      const num = Number(value || 0);
+      if (!Number.isFinite(num)) return 0;
+      if (num < 0) return 0;
+      if (num > 1) return 1;
+      return num;
+    }
+
+    function autoLayoutMultiInput(items) {
+      const list = Array.isArray(items) ? items : [];
+      if (!list.length) return;
+      const cols = Math.max(1, Math.ceil(Math.sqrt(list.length)));
+      const rows = Math.max(1, Math.ceil(list.length / cols));
+      const cellW = 1 / cols;
+      const cellH = 1 / rows;
+      const marginX = Math.min(0.01, cellW * 0.08);
+      const marginY = Math.min(0.01, cellH * 0.08);
+      for (let index = 0; index < list.length; index++) {
+        const col = index % cols;
+        const row = Math.floor(index / cols);
+        const item = list[index];
+        item.x = clamp01(col * cellW + marginX);
+        item.y = clamp01(row * cellH + marginY);
+        item.w = clamp01(Math.max(0.08, cellW - marginX * 2));
+        item.h = clamp01(Math.max(0.08, cellH - marginY * 2));
+        item.z = index;
+      }
+    }
+
+    function ensureCanvasLayout(items) {
+      if (!Array.isArray(items) || !items.length) return;
+      const hasAnyRect = items.some((item) => Number(item && item.w) > 0 || Number(item && item.h) > 0);
+      if (!hasAnyRect) {
+        autoLayoutMultiInput(items);
+        return;
+      }
+      for (let index = 0; index < items.length; index++) {
+        const item = items[index];
+        const w = Number(item.w || 0);
+        const h = Number(item.h || 0);
+        item.w = w > 0 ? clamp01(Math.max(0.08, w)) : 0.24;
+        item.h = h > 0 ? clamp01(Math.max(0.08, h)) : 0.24;
+        item.x = clamp01(item.x || 0);
+        item.y = clamp01(item.y || 0);
+        if (item.x + item.w > 1) item.x = Math.max(0, 1 - item.w);
+        if (item.y + item.h > 1) item.y = Math.max(0, 1 - item.h);
+        item.z = Number.isFinite(Number(item.z)) ? Number(item.z) : index;
+      }
+      items.sort((a, b) => Number(a.z || 0) - Number(b.z || 0));
+      for (let i = 0; i < items.length; i++) {
+        items[i].z = i;
+      }
+    }
+
+    function parseResolutionRatio() {
+      const raw = asText("resolution") || "1280x720";
+      const parts = raw.toLowerCase().split("x");
+      if (parts.length !== 2) return { width: 16, height: 9 };
+      const width = Number(parts[0] || 0);
+      const height = Number(parts[1] || 0);
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+        return { width: 16, height: 9 };
+      }
+      return { width, height };
+    }
+
+    function renderMultiInputCanvas() {
+      const canvas = document.getElementById("multiInputCanvas");
+      if (!canvas) return;
+      const ratio = parseResolutionRatio();
+      canvas.style.aspectRatio = `${ratio.width} / ${ratio.height}`;
+      canvas.innerHTML = "";
+      if (!multiInputSources.length) return;
+      ensureCanvasLayout(multiInputSources);
+
+      const startDrag = (index, mode, downEvent) => {
+        const rect = canvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const target = multiInputSources[index];
+        if (!target) return;
+        const start = {
+          x: target.x,
+          y: target.y,
+          w: target.w,
+          h: target.h,
+          clientX: downEvent.clientX,
+          clientY: downEvent.clientY,
+        };
+        const move = (moveEvent) => {
+          const dx = (moveEvent.clientX - start.clientX) / rect.width;
+          const dy = (moveEvent.clientY - start.clientY) / rect.height;
+          if (mode === "move") {
+            target.x = clamp01(start.x + dx);
+            target.y = clamp01(start.y + dy);
+            if (target.x + target.w > 1) target.x = 1 - target.w;
+            if (target.y + target.h > 1) target.y = 1 - target.h;
+          } else {
+            target.w = clamp01(Math.max(0.08, start.w + dx));
+            target.h = clamp01(Math.max(0.08, start.h + dy));
+            if (target.x + target.w > 1) target.w = 1 - target.x;
+            if (target.y + target.h > 1) target.h = 1 - target.y;
+          }
+          renderMultiInputCanvas();
+        };
+        const up = () => {
+          window.removeEventListener("mousemove", move);
+          window.removeEventListener("mouseup", up);
+          renderMultiInputList();
+        };
+        window.addEventListener("mousemove", move);
+        window.addEventListener("mouseup", up);
+      };
+
+      multiInputSources.forEach((item, index) => {
+        const node = document.createElement("div");
+        node.className = `mosaic-canvas-item${item.primary ? " primary" : ""}`;
+        node.style.left = `${(item.x * 100).toFixed(4)}%`;
+        node.style.top = `${(item.y * 100).toFixed(4)}%`;
+        node.style.width = `${(item.w * 100).toFixed(4)}%`;
+        node.style.height = `${(item.h * 100).toFixed(4)}%`;
+        node.style.zIndex = String(index + 10);
+
+        const head = document.createElement("div");
+        head.className = "mosaic-canvas-head";
+        head.innerHTML = `<span class="mosaic-canvas-label">${item.title || `Source-${index + 1}`}</span><span>#${index + 1}</span>`;
+        head.onmousedown = (event) => {
+          event.preventDefault();
+          document.getElementById("multiInputLayout").value = "canvas";
+          startDrag(index, "move", event);
+        };
+        head.ondblclick = (event) => {
+          event.preventDefault();
+          for (let i = 0; i < multiInputSources.length; i++) {
+            multiInputSources[i].primary = i === index;
+          }
+          renderMultiInputList();
+          renderMultiInputCanvas();
+        };
+
+        const body = document.createElement("div");
+        body.className = "mosaic-canvas-body";
+        body.textContent = item.url || "";
+
+        const handle = document.createElement("div");
+        handle.className = "mosaic-canvas-handle";
+        handle.onmousedown = (event) => {
+          event.preventDefault();
+          document.getElementById("multiInputLayout").value = "canvas";
+          startDrag(index, "resize", event);
+        };
+
+        node.appendChild(head);
+        node.appendChild(body);
+        node.appendChild(handle);
+        canvas.appendChild(node);
+      });
+    }
+
+    function mergeAndSetMultiInputSources(items) {
+      const next = [];
+      const seen = new Set();
+      for (const raw of items || []) {
+        const normalized = normalizeMultiInputSource(raw);
+        if (!normalized) continue;
+        if (seen.has(normalized.url)) continue;
+        seen.add(normalized.url);
+        next.push(normalized);
+      }
+      ensurePrimaryMultiInputSource(next);
+      ensureCanvasLayout(next);
+      multiInputSources = next;
+      renderMultiInputList();
+      renderMultiInputCanvas();
+    }
+
+    function renderMultiInputList() {
+      const container = document.getElementById("multiInputList");
+      if (!container) return;
+      container.innerHTML = "";
+      if (!multiInputSources.length) {
+        container.innerHTML = '<div class="mosaic-item-empty">当前没有拼屏源。可从“摄像头库多选”添加，或手动添加 URL。</div>';
+        return;
+      }
+      multiInputSources.forEach((item, index) => {
+        const row = document.createElement("div");
+        row.className = "mosaic-item";
+        row.draggable = true;
+        row.dataset.index = String(index);
+
+        row.addEventListener("dragstart", (event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", String(index));
+        });
+        row.addEventListener("dragover", (event) => {
+          event.preventDefault();
+          row.classList.add("drag-over");
+          event.dataTransfer.dropEffect = "move";
+        });
+        row.addEventListener("dragleave", () => {
+          row.classList.remove("drag-over");
+        });
+        row.addEventListener("drop", (event) => {
+          event.preventDefault();
+          row.classList.remove("drag-over");
+          const from = Number(event.dataTransfer.getData("text/plain"));
+          const to = index;
+          if (!Number.isFinite(from) || from < 0 || from >= multiInputSources.length || from === to) return;
+          const moved = multiInputSources.splice(from, 1)[0];
+          multiInputSources.splice(to, 0, moved);
+          ensurePrimaryMultiInputSource(multiInputSources);
+          for (let i = 0; i < multiInputSources.length; i++) {
+            multiInputSources[i].z = i;
+          }
+          renderMultiInputList();
+          renderMultiInputCanvas();
+        });
+
+        const head = document.createElement("div");
+        head.className = "mosaic-item-head";
+
+        const handle = document.createElement("span");
+        handle.className = "mosaic-item-handle";
+        handle.textContent = "↕";
+        head.appendChild(handle);
+
+        const titleInput = document.createElement("input");
+        titleInput.className = "mosaic-item-title";
+        titleInput.value = item.title || "";
+        titleInput.placeholder = `来源 ${index + 1} 标题`;
+        titleInput.onchange = () => {
+          multiInputSources[index].title = String(titleInput.value || "").trim();
+          renderMultiInputCanvas();
+        };
+        head.appendChild(titleInput);
+
+        const primaryBtn = document.createElement("button");
+        primaryBtn.type = "button";
+        primaryBtn.className = item.primary ? "btn-success btn-mini" : "btn-ghost btn-mini";
+        primaryBtn.textContent = item.primary ? "主画面" : "设为主画面";
+        primaryBtn.onclick = () => {
+          for (let i = 0; i < multiInputSources.length; i++) {
+            multiInputSources[i].primary = i === index;
+          }
+          renderMultiInputList();
+          renderMultiInputCanvas();
+        };
+        head.appendChild(primaryBtn);
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "btn-danger btn-mini";
+        removeBtn.textContent = "移除";
+        removeBtn.onclick = () => {
+          multiInputSources.splice(index, 1);
+          ensurePrimaryMultiInputSource(multiInputSources);
+          ensureCanvasLayout(multiInputSources);
+          renderMultiInputList();
+          renderMultiInputCanvas();
+        };
+        head.appendChild(removeBtn);
+
+        const urlInput = document.createElement("input");
+        urlInput.value = item.url || "";
+        urlInput.placeholder = "URL";
+        urlInput.onchange = () => {
+          multiInputSources[index].url = String(urlInput.value || "").trim();
+          renderMultiInputCanvas();
+        };
+
+        const info = document.createElement("div");
+        info.className = "mosaic-item-url";
+        info.textContent = `类型：${item.sourceType || "custom"} ｜ 拖拽可调整布局顺序`;
+
+        row.appendChild(head);
+        row.appendChild(urlInput);
+        row.appendChild(info);
+        container.appendChild(row);
+      });
+    }
+
+    function collectMultiInputSourcesForPayload() {
+      ensureCanvasLayout(multiInputSources);
+      const normalized = [];
+      const seen = new Set();
+      for (const item of multiInputSources) {
+        const source = normalizeMultiInputSource(item);
+        if (!source) continue;
+        if (seen.has(source.url)) continue;
+        seen.add(source.url);
+        source.x = clamp01(source.x);
+        source.y = clamp01(source.y);
+        source.w = clamp01(Math.max(0.08, source.w || 0));
+        source.h = clamp01(Math.max(0.08, source.h || 0));
+        source.z = normalized.length;
+        normalized.push(source);
+      }
+      ensurePrimaryMultiInputSource(normalized);
+      multiInputSources = normalized;
+      return normalized;
+    }
+
+    function fillMultiInputCameraPicker(items) {
+      const picker = document.getElementById("multiInputCameraPicker");
+      if (!picker) return;
+      picker.innerHTML = "";
+      for (const item of items || []) {
+        const source = cameraToMosaicSource(item);
+        if (!source) continue;
+        const option = document.createElement("option");
+        option.value = String(item.id);
+        option.textContent = `${item.name || `Camera-${item.id}`} [${cameraTypeLabel(item.sourceType)}]`;
+        picker.appendChild(option);
+      }
+    }
+
+    function addSelectedCamerasToMultiInput() {
+      const picker = document.getElementById("multiInputCameraPicker");
+      if (!picker) return { added: 0, skipped: 0 };
+      const selected = Array.from(picker.selectedOptions || []);
+      if (!selected.length) throw new Error("请先在摄像头库里选择至少一项");
+
+      let added = 0;
+      let skipped = 0;
+      const existing = new Set(multiInputSources.map((item) => item.url));
+      for (const option of selected) {
+        const id = Number(option.value || 0);
+        const camera = cameraMap.get(id);
+        const source = cameraToMosaicSource(camera);
+        if (!source || existing.has(source.url)) {
+          skipped++;
+          continue;
+        }
+        existing.add(source.url);
+        multiInputSources.push(source);
+        added++;
+      }
+      ensurePrimaryMultiInputSource(multiInputSources);
+      ensureCanvasLayout(multiInputSources);
+      renderMultiInputList();
+      renderMultiInputCanvas();
+      return { added, skipped };
+    }
+
+    function addManualMultiInputSource() {
+      const url = String(document.getElementById("multiInputManualUrl").value || "").trim();
+      const title = String(document.getElementById("multiInputManualTitle").value || "").trim();
+      if (!url) throw new Error("请先输入拼屏源 URL");
+      if (multiInputSources.some((item) => item.url === url)) {
+        throw new Error("该 URL 已经在拼屏列表中");
+      }
+      const sourceType = url.startsWith("rtsp://") ? "rtsp"
+        : (url.includes(".mjpg") || url.includes("mjpeg")) ? "mjpeg"
+        : url.startsWith("rtmp://") ? "rtmp"
+        : "custom";
+      multiInputSources.push({
+        url,
+        title: title || `Source-${multiInputSources.length + 1}`,
+        primary: false,
+        sourceType,
+        materialId: 0,
+        x: 0,
+        y: 0,
+        w: 0,
+        h: 0,
+        z: multiInputSources.length,
+      });
+      ensurePrimaryMultiInputSource(multiInputSources);
+      ensureCanvasLayout(multiInputSources);
+      renderMultiInputList();
+      renderMultiInputCanvas();
+      document.getElementById("multiInputManualUrl").value = "";
+      document.getElementById("multiInputManualTitle").value = "";
+    }
+
     function fillByCamera(item) {
       if (!item) return;
       const type = String(item.sourceType || "").toLowerCase();
@@ -422,6 +905,7 @@
         option.textContent = `${item.name || `Camera-${item.id}`} [${cameraTypeLabel(item.sourceType)}] ${cameraHint(item)}`;
         select.appendChild(option);
       }
+      fillMultiInputCameraPicker(items);
     }
 
     async function applySelectedCamera() {
@@ -476,6 +960,11 @@
       document.getElementById("usbName").value = data.inputDeviceName || "";
       document.getElementById("usbResolution").value = data.inputDeviceResolution || "1280x720";
       document.getElementById("usbFramerate").value = String(data.inputDeviceFramerate || 30);
+      document.getElementById("multiInputEnabled").value = data.multiInputEnabled ? "true" : "false";
+      document.getElementById("multiInputLayout").value = data.multiInputLayout || "2x2";
+      const fromMeta = Array.isArray(data.multiInputMeta) ? data.multiInputMeta : [];
+      const fromURL = Array.isArray(data.multiInputUrls) ? data.multiInputUrls.map((url) => ({ url })) : [];
+      mergeAndSetMultiInputSources(fromMeta.length ? fromMeta : fromURL);
       switchInputPanels();
       autoSuggestAdvancedCommand();
     }
@@ -489,6 +978,12 @@
 
     function buildPayload() {
       const inputType = asText("inputType") || "video";
+      const multiInputEnabled = asBool("multiInputEnabled");
+      const multiInputLayout = asText("multiInputLayout") || "2x2";
+      const multiSources = collectMultiInputSourcesForPayload();
+      if (multiInputEnabled && multiSources.length < 2) {
+        throw new Error("启用拼屏时至少需要 2 路有效输入源");
+      }
       const payload = {
         model: asNumber("model", 1),
         inputType,
@@ -508,7 +1003,11 @@
         onvifProfileToken: asText("onvifProfileToken"),
         inputDeviceName: asText("usbName"),
         inputDeviceResolution: asText("usbResolution"),
-        inputDeviceFramerate: asNumber("usbFramerate", 30)
+        inputDeviceFramerate: asNumber("usbFramerate", 30),
+        multiInputEnabled,
+        multiInputLayout,
+        multiInputMeta: multiSources,
+        multiInputUrls: multiSources.map((item) => item.url),
       };
       if (inputType === "onvif") {
         payload.rtspUrl = asText("onvifRtspUrl");
@@ -566,8 +1065,16 @@
       autoSuggestAdvancedCommand();
     };
     document.getElementById("model").onchange = autoSuggestAdvancedCommand;
+    document.getElementById("resolution").onchange = () => {
+      renderMultiInputCanvas();
+    };
     document.getElementById("bitratePreset").onchange = syncBitrateCustomVisibility;
     document.getElementById("cameraFilterType").onchange = () => loadCameras().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
+    document.getElementById("multiInputEnabled").onchange = () => {
+      if (!asBool("multiInputEnabled")) {
+        showToast("已关闭拼屏，推流将按单路输入源配置运行", "info");
+      }
+    };
 
     bindAction("load", loadSetting, "box", { successToast: false });
     bindAction("save", saveSetting, "box");
@@ -604,6 +1111,41 @@
       stopLocalPreview();
       showJSON("box", { code: 0, message: "已关闭本地预览" });
     }, "box");
+    bindAction("btnMultiInputAddSelected", async () => {
+      const result = addSelectedCamerasToMultiInput();
+      if (!result.added && result.skipped) {
+        throw new Error("所选摄像头未能添加（可能缺少可拉流地址或已存在）");
+      }
+      showJSON("box", { code: 0, message: `拼屏源新增 ${result.added} 路，跳过 ${result.skipped} 路` });
+      return { code: 0, message: `已添加 ${result.added} 路` };
+    }, "box");
+    bindAction("btnMultiInputAddManual", async () => {
+      addManualMultiInputSource();
+      showJSON("box", { code: 0, message: "manual mosaic source added" });
+      return { code: 0, message: "manual mosaic source added" };
+    }, "box");
+    bindAction("btnMultiInputAutoLayout", async () => {
+      if (!multiInputSources.length) {
+        throw new Error("no mosaic source to layout");
+      }
+      autoLayoutMultiInput(multiInputSources);
+      document.getElementById("multiInputLayout").value = "canvas";
+      renderMultiInputList();
+      renderMultiInputCanvas();
+      showJSON("box", { code: 0, message: "auto layout finished and switched to canvas" });
+      return { code: 0, message: "auto layout finished" };
+    }, "box");
+    bindAction("btnMultiInputClear", async () => {
+      const ok = await showConfirm("clear mosaic", "clear all mosaic sources?");
+      if (!ok) {
+        return { code: 0, message: "cancelled" };
+      }
+      multiInputSources = [];
+      renderMultiInputList();
+      renderMultiInputCanvas();
+      showJSON("box", { code: 0, message: "mosaic sources cleared" });
+      return { code: 0, message: "mosaic sources cleared" };
+    }, "box");
     bindAction("btnOpenAdvancedConsole", async () => {
       window.open("/app/index.html", "_blank", "noopener");
       return { code: 0, message: "已打开高级控制台" };
@@ -611,6 +1153,8 @@
 
     switchInputPanels();
     applyBitratePresetFromValue(0);
+    renderMultiInputList();
+    renderMultiInputCanvas();
     stopLocalPreview();
     loadSetting().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
     loadCameras().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
