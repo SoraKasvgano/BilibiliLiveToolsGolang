@@ -196,6 +196,114 @@ function withError(boxId, fn) {
   };
 }
 
+// 按钮加载状态辅助函数
+function setButtonLoading(buttonId, loading) {
+  const btn = document.getElementById(buttonId);
+  if (!btn) return;
+  if (loading) {
+    btn.classList.add('loading');
+    btn.disabled = true;
+    btn.dataset.originalText = btn.textContent;
+  } else {
+    btn.classList.remove('loading');
+    btn.disabled = false;
+    if (btn.dataset.originalText) {
+      btn.textContent = btn.dataset.originalText;
+    }
+  }
+}
+
+// 带加载状态的错误处理包装器
+function withLoadingAndError(buttonId, boxId, fn) {
+  return async () => {
+    setButtonLoading(buttonId, true);
+    try {
+      await fn();
+    } catch (error) {
+      console.error(error);
+      setBox(boxId, { code: -1, message: error.message || String(error) });
+      showToast(error.message || String(error), 'error');
+    } finally {
+      setButtonLoading(buttonId, false);
+    }
+  };
+}
+
+// 防抖函数
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
+
+// 节流函数
+function throttle(func, limit) {
+  let inThrottle;
+  return function(...args) {
+    if (!inThrottle) {
+      func.apply(this, args);
+      inThrottle = true;
+      setTimeout(() => inThrottle = false, limit);
+    }
+  };
+}
+
+// Toast 通知函数
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toastContainer') || createToastContainer();
+  const toast = document.createElement('div');
+  toast.className = `toast-item toast-${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+function createToastContainer() {
+  const container = document.createElement('div');
+  container.id = 'toastContainer';
+  container.style.cssText = 'position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:10px;';
+  document.body.appendChild(container);
+  return container;
+}
+
+// 输入验证辅助函数
+function validateInput(inputId, validator, errorMessage) {
+  const input = document.getElementById(inputId);
+  if (!input) return true;
+
+  const value = input.value.trim();
+  const isValid = validator(value);
+
+  if (!isValid) {
+    input.classList.add('error');
+    let errorEl = input.nextElementSibling;
+    if (!errorEl || !errorEl.classList.contains('input-error')) {
+      errorEl = document.createElement('div');
+      errorEl.className = 'input-error';
+      input.parentNode.insertBefore(errorEl, input.nextSibling);
+    }
+    errorEl.textContent = errorMessage;
+  } else {
+    input.classList.remove('error');
+    const errorEl = input.nextElementSibling;
+    if (errorEl && errorEl.classList.contains('input-error')) {
+      errorEl.remove();
+    }
+  }
+
+  return isValid;
+}
+
 let mosaicSources = [];
 let mosaicDragIndex = -1;
 let mosaicLocalPreviewRunning = false;

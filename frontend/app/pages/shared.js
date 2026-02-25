@@ -131,6 +131,12 @@
     toggle.id = "navToggle";
     toggle.textContent = "☰";
     toggle.setAttribute("aria-label", "Toggle navigation");
+    toggle.onclick = () => {
+      const navLinks = document.getElementById("navLinks");
+      if (navLinks) {
+        navLinks.classList.toggle("show");
+      }
+    };
     navMain.appendChild(toggle);
 
     const brand = document.createElement("span");

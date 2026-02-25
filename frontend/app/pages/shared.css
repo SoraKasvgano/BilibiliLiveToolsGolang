@@ -116,6 +116,44 @@ body {
   color: #dbeafe;
   font-size: 16px;
   line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.nav-toggle:hover {
+  background: #1e293b;
+}
+
+@media (max-width: 768px) {
+  .nav-toggle {
+    display: block;
+  }
+
+  .shared-header .nav-links {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #0f172a;
+    flex-direction: column;
+    padding: 10px;
+    border-top: 1px solid #334155;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+
+  .shared-header .nav-links.show {
+    display: flex;
+  }
+
+  .shared-header .nav-links a {
+    width: 100%;
+    text-align: left;
+  }
+
+  .shared-header .nav-actions {
+    flex-wrap: wrap;
+  }
 }
 
 .page-shell {
