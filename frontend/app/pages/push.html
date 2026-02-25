@@ -123,6 +123,25 @@
 
     <section class="page-card">
       <h2>输入源详情</h2>
+      <div id="panelVIDEO" class="soft-panel panel-hidden">
+        <h3>视频素材</h3>
+        <div class="grid two">
+          <label>视频素材
+            <select id="videoMaterialSelect">
+              <option value="">（请先刷新素材）</option>
+            </select>
+          </label>
+          <label>背景音频（可选）
+            <select id="audioMaterialSelect">
+              <option value="">（不使用）</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnLoadMaterialSources">刷新素材列表</button>
+        </div>
+        <div id="videoMaterialHint" class="soft-note">请选择一个视频素材作为推流输入源。</div>
+      </div>
       <div id="panelRTSP" class="soft-panel panel-hidden">
         <h3>RTSP</h3>
         <label>RTSP URL<input id="rtspUrl" placeholder="rtsp://user:pass@ip/stream" /></label>
@@ -281,6 +300,10 @@
     initPage({ active: "push" });
 
     const cameraMap = new Map();
+    const videoMaterialMap = new Map();
+    const audioMaterialMap = new Map();
+    let pendingVideoMaterialId = "";
+    let pendingAudioMaterialId = "";
     let localPreviewRunning = false;
     let localPreviewPeer = null;
     let localPreviewSessionId = "";
@@ -507,12 +530,102 @@
     function switchInputPanels() {
 
       const inputType = asText("inputType");
+      setPanelVisible("panelVIDEO", inputType === "video");
       setPanelVisible("panelRTSP", inputType === "rtsp");
       setPanelVisible("panelMJPEG", inputType === "mjpeg");
       setPanelVisible("panelRTMP", inputType === "rtmp");
       setPanelVisible("panelGB28181", inputType === "gb28181");
       setPanelVisible("panelONVIF", inputType === "onvif");
       setPanelVisible("panelUSB", inputType === "usb_camera" || inputType === "usb_camera_plus");
+    }
+
+    function toMaterialRows(result) {
+      const data = result && result.data ? result.data : {};
+      if (Array.isArray(data.data)) return data.data;
+      if (Array.isArray(data)) return data;
+      return [];
+    }
+
+    function fillMaterialSelect(selectId, materialMap, rows, emptyText) {
+      const select = document.getElementById(selectId);
+      select.innerHTML = "";
+      materialMap.clear();
+      const base = document.createElement("option");
+      base.value = "";
+      base.textContent = emptyText;
+      select.appendChild(base);
+      for (const item of rows) {
+        const id = Number(item && item.id ? item.id : 0);
+        if (!id) continue;
+        const key = String(id);
+        materialMap.set(key, item);
+        const option = document.createElement("option");
+        option.value = key;
+        const fileType = String(item.fileType || "").trim();
+        const typeText = fileType ? `[${fileType}] ` : "";
+        option.textContent = `${typeText}${item.name || `Material-${id}`}`;
+        select.appendChild(option);
+      }
+    }
+
+    function setPendingMaterialSelection(videoID, audioID) {
+      pendingVideoMaterialId = videoID > 0 ? String(videoID) : "";
+      pendingAudioMaterialId = audioID > 0 ? String(audioID) : "";
+      applyPendingMaterialSelection();
+    }
+
+    function applyPendingMaterialSelection() {
+      const videoSelect = document.getElementById("videoMaterialSelect");
+      const audioSelect = document.getElementById("audioMaterialSelect");
+      if (!pendingVideoMaterialId) {
+        videoSelect.value = "";
+      } else if (videoMaterialMap.has(pendingVideoMaterialId)) {
+        videoSelect.value = pendingVideoMaterialId;
+      }
+      if (!pendingAudioMaterialId) {
+        audioSelect.value = "";
+      } else if (audioMaterialMap.has(pendingAudioMaterialId)) {
+        audioSelect.value = pendingAudioMaterialId;
+      }
+      updateMaterialHint();
+    }
+
+    function updateMaterialHint() {
+      const videoID = asText("videoMaterialSelect");
+      const audioID = asText("audioMaterialSelect");
+      const video = videoMaterialMap.get(videoID);
+      const audio = audioMaterialMap.get(audioID);
+      const parts = [];
+      if (video) {
+        parts.push(`视频：${video.name || `#${videoID}`} ${video.path || video.fullPath || ""}`.trim());
+      }
+      if (audio) {
+        parts.push(`音频：${audio.name || `#${audioID}`} ${audio.path || audio.fullPath || ""}`.trim());
+      }
+      const hint = parts.length ? parts.join(" | ") : "请选择一个视频素材作为推流输入源。";
+      document.getElementById("videoMaterialHint").textContent = hint;
+    }
+
+    async function loadMaterialSources() {
+      const [videoResult, audioResult] = await Promise.all([
+        requestJSON("/api/v1/materials?page=1&limit=200&fileType=1"),
+        requestJSON("/api/v1/materials?page=1&limit=200&fileType=2"),
+      ]);
+      const videoRows = toMaterialRows(videoResult);
+      const audioRows = toMaterialRows(audioResult);
+      fillMaterialSelect("videoMaterialSelect", videoMaterialMap, videoRows, "（请选择视频素材）");
+      fillMaterialSelect("audioMaterialSelect", audioMaterialMap, audioRows, "（不使用）");
+      applyPendingMaterialSelection();
+      const info = {
+        code: 0,
+        message: `素材加载完成：视频 ${videoRows.length} 条，音频 ${audioRows.length} 条`,
+        data: {
+          videoCount: videoRows.length,
+          audioCount: audioRows.length,
+        },
+      };
+      showJSON("box", info);
+      return info;
     }
 
     function isUsbTemplateCommand(commandText) {
@@ -1151,6 +1264,7 @@
       document.getElementById("usbName").value = data.inputDeviceName || "";
       document.getElementById("usbResolution").value = data.inputDeviceResolution || "1280x720";
       document.getElementById("usbFramerate").value = String(data.inputDeviceFramerate || 30);
+      setPendingMaterialSelection(Number(data.videoId || 0), Number(data.audioId || 0));
       document.getElementById("multiInputEnabled").value = data.multiInputEnabled ? "true" : "false";
       document.getElementById("multiInputLayout").value = data.multiInputLayout || "2x2";
       const fromMeta = Array.isArray(data.multiInputMeta) ? data.multiInputMeta : [];
@@ -1173,11 +1287,16 @@
 
     function buildPayload() {
       const inputType = asText("inputType") || "video";
+      const videoId = Number(asText("videoMaterialSelect") || 0);
+      const audioId = Number(asText("audioMaterialSelect") || 0);
       const multiInputEnabled = asBool("multiInputEnabled");
       const multiInputLayout = asText("multiInputLayout") || "2x2";
       const multiSources = collectMultiInputSourcesForPayload();
       if (multiInputEnabled && multiSources.length < 2) {
         throw new Error("启用拼屏时至少需要 2 路有效输入源");
+      }
+      if (inputType === "video" && videoId <= 0) {
+        throw new Error("please select a video material source before saving");
       }
       const sourceAudioEnabled = asBool("sourceAudioEnabled");
       const hasMultiAudioSource = multiSources.some((item) => Boolean(item.enableAudio));
@@ -1185,6 +1304,8 @@
       const payload = {
         model: asNumber("model", 1),
         inputType,
+        videoId,
+        audioId,
         outputResolution: asText("resolution") || "1280x720",
         outputQuality: asNumber("quality", 2),
         outputBitrateKbps: currentBitrateKbps(),
@@ -1282,6 +1403,8 @@
       switchInputPanels();
       autoSuggestAdvancedCommand();
     };
+    document.getElementById("videoMaterialSelect").onchange = updateMaterialHint;
+    document.getElementById("audioMaterialSelect").onchange = updateMaterialHint;
     document.getElementById("model").onchange = autoSuggestAdvancedCommand;
     document.getElementById("resolution").onchange = () => {
       renderMultiInputCanvas();
@@ -1331,6 +1454,7 @@
     bindAction("status", () => refreshPushStatus(false), "box", { successToast: false });
     bindAction("btnLoadCameras", loadCameras, "box", { successToast: false });
     bindAction("btnApplyCamera", applySelectedCamera, "box");
+    bindAction("btnLoadMaterialSources", loadMaterialSources, "box", { successToast: false });
     bindAction("btnOpenCameraPage", async () => {
       window.location.href = "/app/pages/cameras.html";
     }, "box");
@@ -1395,6 +1519,7 @@
     stopLocalPreview();
     loadSetting().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
     loadCameras().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
+    loadMaterialSources().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));
     const statusPoller = createPoller(() => refreshPushStatus(true), 5000);
     statusPoller.start();
   </script>

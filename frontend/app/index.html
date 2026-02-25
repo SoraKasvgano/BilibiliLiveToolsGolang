@@ -7,25 +7,30 @@
   <link rel="stylesheet" href="/app/styles.css" />
 </head>
 <body>
-  <header class="hero">
-    <div class="hero-inner">
-      <h1>Gover 控制台（Go 重写版）</h1>
-      <p>支持 USB 摄像头 / 视频文件 / RTSP / MJPEG 推流，预留弹幕 PTZ 与机器人联动接口。</p>
-      <div class="hero-links">
-        <a href="/app/pages/home.html" target="_blank" rel="noopener">功能首页</a>
-        <a href="/app/pages/login.html" target="_blank" rel="noopener">扫码登录页(1:1)</a>
-        <a href="/swagger/" target="_blank" rel="noopener">离线 Swagger 文档</a>
-        <a href="/openapi.json" target="_blank" rel="noopener">OpenAPI JSON</a>
-        <a href="/app/pages/push.html" target="_blank" rel="noopener">Push 页面(迁移版)</a>
-        <a href="/app/pages/room.html" target="_blank" rel="noopener">Room 页面(迁移版)</a>
-        <a href="/app/pages/material.html" target="_blank" rel="noopener">Material 页面(迁移版)</a>
-        <a href="/app/pages/monitor.html" target="_blank" rel="noopener">Monitor 页面(迁移版)</a>
-        <a href="/legacy/layuiadmin/index.js" target="_blank" rel="noopener">legacy 兼容资源(仅保留兼容)</a>
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1>高级控制台</h1>
       </div>
-    </div>
-  </header>
+      <nav class="sidebar-nav">
+        <a class="nav-item active" data-section="config">运行配置</a>
+        <a class="nav-item" data-section="recording">录制管理</a>
+        <a class="nav-item" data-section="streaming">推流管理</a>
+        <a class="nav-item" data-section="account">账号管理</a>
+        <a class="nav-item" data-section="danmaku">弹幕规则</a>
+        <a class="nav-item" data-section="mosaic">拼屏配置</a>
+        <a class="nav-item" data-section="webhook">Webhook</a>
+        <a class="nav-item" data-section="bot">Bot 配置</a>
+        <a class="nav-item" data-section="integration">扩展集成</a>
+        <a class="nav-item" data-section="live">直播数据</a>
+        <a class="nav-item" data-section="logs">FFmpeg 日志</a>
+        <a class="nav-item" data-section="maintenance">数据库维护</a>
+      </nav>
+    </aside>
 
-  <main class="layout">
+    <main class="main-content">
+      <div class="layout">
+        <section class="section-content active" id="section-config">
     <section class="card">
       <h2>运行配置（配置文件优先）</h2>
       <label>配置文件路径
@@ -78,7 +83,9 @@
       </div>
       <pre id="configBox">{}</pre>
     </section>
+        </section>
 
+        <section class="section-content" id="section-account">
     <section class="card">
       <h2>账号与登录</h2>
       <div class="actions">
@@ -105,7 +112,9 @@
       <button id="btnSaveStreamUrl">保存手动推流地址</button>
       <pre id="accountBox">加载中...</pre>
     </section>
+        </section>
 
+        <section class="section-content" id="section-recording">
     <section class="card">
       <h2>直播间配置</h2>
       <div class="grid two">
@@ -124,7 +133,18 @@
       <button id="btnSaveAnnouncement">保存公告</button>
       <pre id="roomBox">{}</pre>
     </section>
+    <section class="card">
+      <h2>素材管理</h2>
+      <input id="materialUpload" type="file" multiple />
+      <div class="actions">
+        <button id="btnUploadMaterial">上传素材</button>
+        <button id="btnListMaterial">刷新素材列表</button>
+      </div>
+      <pre id="materialBox">[]</pre>
+    </section>
+        </section>
 
+        <section class="section-content" id="section-streaming">
     <section class="card">
       <h2>推流配置与控制</h2>
       <div class="grid two">
@@ -282,17 +302,9 @@
       </div>
       <pre id="pushBox">{}</pre>
     </section>
+        </section>
 
-    <section class="card">
-      <h2>素材管理</h2>
-      <input id="materialUpload" type="file" multiple />
-      <div class="actions">
-        <button id="btnUploadMaterial">上传素材</button>
-        <button id="btnListMaterial">刷新素材列表</button>
-      </div>
-      <pre id="materialBox">[]</pre>
-    </section>
-
+        <section class="section-content" id="section-integration">
     <section class="card">
       <h2>扩展集成（明文 API Key / 弹幕 PTZ）</h2>
       <div class="grid two">
@@ -402,7 +414,9 @@
       </div>
       <pre id="integrationBox">[]</pre>
     </section>
+        </section>
 
+        <section class="section-content" id="section-live">
     <section class="card">
       <h2>直播数据与容错日志</h2>
       <div class="grid two">
@@ -621,7 +635,9 @@
       </div>
       <pre id="liveDataBox">[]</pre>
     </section>
+        </section>
 
+        <section class="section-content" id="section-logs">
     <section class="card">
       <h2>FFmpeg 日志</h2>
       <div class="actions">
@@ -629,7 +645,9 @@
       </div>
       <pre id="logBox">[]</pre>
     </section>
+        </section>
 
+        <section class="section-content" id="section-maintenance">
     <section class="card">
       <h2>数据库维护与压缩</h2>
       <div class="grid two">
@@ -681,7 +699,11 @@
       </div>
       <pre id="maintenanceBox">[]</pre>
     </section>
-  </main>
+        </section>
+
+      </div>
+    </main>
+  </div>
 
   <script src="/app/app.js"></script>
 </body>

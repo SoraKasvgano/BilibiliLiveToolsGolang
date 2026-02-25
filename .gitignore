@@ -27,3 +27,4 @@ AGENTS.md
 /dist
 /data
 /_research_gowvp_owl
+.claude/settings.local.json
