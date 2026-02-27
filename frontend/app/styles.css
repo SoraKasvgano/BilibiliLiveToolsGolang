@@ -41,6 +41,29 @@ body {
   font-weight: 600;
 }
 
+.sidebar-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sidebar-home-link {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  color: #fff;
+  text-decoration: none;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.sidebar-home-link:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
 .sidebar-nav {
   padding: 12px 0;
 }

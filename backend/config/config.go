@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -88,6 +90,140 @@ func defaultFFprobePathByOS() string {
 	default:
 		return "ffprobe"
 	}
+}
+
+func AutoDetectFFmpegAndFFprobePaths() (string, string) {
+	ffmpegPath := firstExistingBinary(ffmpegCandidatesByOS())
+	if strings.TrimSpace(ffmpegPath) == "" {
+		ffmpegPath = searchBinaryInCommonRoots(defaultBinaryNameByOS("ffmpeg"), 8)
+	}
+
+	ffprobePath := firstExistingBinary(ffprobeCandidatesByOS())
+	if strings.TrimSpace(ffprobePath) == "" {
+		ffprobePath = searchBinaryInCommonRoots(defaultBinaryNameByOS("ffprobe"), 8)
+	}
+
+	if ffmpegPath != "" && ffprobePath == "" {
+		candidate := filepath.Join(filepath.Dir(ffmpegPath), defaultBinaryNameByOS("ffprobe"))
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			if abs, absErr := filepath.Abs(candidate); absErr == nil {
+				ffprobePath = abs
+			} else {
+				ffprobePath = candidate
+			}
+		}
+	}
+	return ffmpegPath, ffprobePath
+}
+
+func defaultBinaryNameByOS(tool string) string {
+	name := strings.TrimSpace(tool)
+	if name == "" {
+		name = "ffmpeg"
+	}
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
+}
+
+func searchBinaryInCommonRoots(binaryName string, maxDepth int) string {
+	roots := make([]string, 0, 4)
+	if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
+		roots = append(roots, wd)
+	}
+	roots = append(roots, ".")
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		roots = append(roots, exeDir)
+		roots = append(roots, filepath.Dir(exeDir))
+	}
+	return searchBinaryInRoots(binaryName, roots, maxDepth)
+}
+
+func searchBinaryInRoots(binaryName string, roots []string, maxDepth int) string {
+	targetName := strings.TrimSpace(binaryName)
+	if targetName == "" {
+		return ""
+	}
+	stopWalk := errors.New("binary found")
+	visited := make(map[string]struct{}, len(roots))
+	for _, root := range roots {
+		rootPath := strings.TrimSpace(root)
+		if rootPath == "" {
+			continue
+		}
+		if absRoot, err := filepath.Abs(rootPath); err == nil {
+			rootPath = absRoot
+		}
+		if _, ok := visited[rootPath]; ok {
+			continue
+		}
+		visited[rootPath] = struct{}{}
+
+		info, err := os.Stat(rootPath)
+		if err != nil {
+			continue
+		}
+		if !info.IsDir() {
+			if binaryNameEqual(filepath.Base(rootPath), targetName) {
+				return rootPath
+			}
+			continue
+		}
+
+		foundPath := ""
+		walkErr := filepath.WalkDir(rootPath, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return nil
+			}
+			relPath, relErr := filepath.Rel(rootPath, path)
+			if relErr != nil {
+				relPath = path
+			}
+			cleanRel := filepath.Clean(relPath)
+			depth := 0
+			if cleanRel != "." {
+				depth = strings.Count(cleanRel, string(filepath.Separator)) + 1
+			}
+
+			if entry.IsDir() {
+				if depth > maxDepth {
+					return filepath.SkipDir
+				}
+				if depth > 0 {
+					name := strings.ToLower(entry.Name())
+					if name == ".git" || name == "node_modules" {
+						return filepath.SkipDir
+					}
+				}
+				return nil
+			}
+			if !binaryNameEqual(entry.Name(), targetName) {
+				return nil
+			}
+			if absPath, absErr := filepath.Abs(path); absErr == nil {
+				foundPath = absPath
+			} else {
+				foundPath = path
+			}
+			return stopWalk
+		})
+		if foundPath != "" {
+			return foundPath
+		}
+		if walkErr != nil && !errors.Is(walkErr, stopWalk) {
+			continue
+		}
+	}
+	return ""
+}
+
+func binaryNameEqual(current string, expected string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(strings.TrimSpace(current), strings.TrimSpace(expected))
+	}
+	return strings.TrimSpace(current) == strings.TrimSpace(expected)
 }
 
 func ffmpegCandidatesByOS() []string {

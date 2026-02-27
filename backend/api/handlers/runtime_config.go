@@ -30,6 +30,7 @@ func (m *runtimeConfigModule) Routes() []router.Route {
 		{Method: http.MethodGet, Pattern: "/config", Summary: "Get runtime config", Handler: m.getConfig},
 		{Method: http.MethodPost, Pattern: "/config", Summary: "Save runtime config and hot reload", Handler: m.saveConfig},
 		{Method: http.MethodPost, Pattern: "/config/reload", Summary: "Reload config from file", Handler: m.reloadConfig},
+		{Method: http.MethodPost, Pattern: "/config/ffmpeg/auto-detect", Summary: "Auto detect ffmpeg/ffprobe path and save", Handler: m.autoDetectFFmpeg},
 	}
 }
 
@@ -90,6 +91,50 @@ func (m *runtimeConfigModule) reloadConfig(w http.ResponseWriter, r *http.Reques
 		"requiresRestart": len(restartFields) > 0,
 		"restartFields":   restartFields,
 		"hotReloadNotes":  runtimeHotReloadNotes(),
+	})
+}
+
+func (m *runtimeConfigModule) autoDetectFFmpeg(w http.ResponseWriter, r *http.Request) {
+	if m.deps.ConfigMgr == nil {
+		httpapi.Error(w, -1, "config manager not available", http.StatusOK)
+		return
+	}
+	oldCfg := m.deps.ConfigMgr.Current()
+	ffmpegPath, ffprobePath := config.AutoDetectFFmpegAndFFprobePaths()
+	if strings.TrimSpace(ffmpegPath) == "" {
+		httpapi.Error(w, -1, "未在当前目录或程序目录子目录中找到 ffmpeg，可手动输入路径后再次保存", http.StatusOK)
+		return
+	}
+	targetFFprobePath := oldCfg.FFprobePath
+	if strings.TrimSpace(ffprobePath) != "" {
+		targetFFprobePath = ffprobePath
+	}
+	if strings.TrimSpace(oldCfg.FFmpegPath) == strings.TrimSpace(ffmpegPath) && strings.TrimSpace(oldCfg.FFprobePath) == strings.TrimSpace(targetFFprobePath) {
+		httpapi.OK(w, map[string]any{
+			"updated":        false,
+			"config":         oldCfg,
+			"configFile":     oldCfg.ConfigFile,
+			"ffmpegPath":     oldCfg.FFmpegPath,
+			"ffprobePath":    oldCfg.FFprobePath,
+			"hotReloadNotes": runtimeHotReloadNotes(),
+		})
+		return
+	}
+	nextCfg := oldCfg
+	nextCfg.FFmpegPath = ffmpegPath
+	nextCfg.FFprobePath = targetFFprobePath
+	saved, err := m.deps.ConfigMgr.Save(nextCfg)
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	httpapi.OK(w, map[string]any{
+		"updated":        true,
+		"config":         saved,
+		"configFile":     saved.ConfigFile,
+		"ffmpegPath":     saved.FFmpegPath,
+		"ffprobePath":    saved.FFprobePath,
+		"hotReloadNotes": runtimeHotReloadNotes(),
 	})
 }
 

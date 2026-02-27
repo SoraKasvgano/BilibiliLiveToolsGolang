@@ -32,13 +32,13 @@ func New(ffmpegPath string, ffprobePath string) *Service {
 func (s *Service) BinaryPath() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.ffmpegPath
+	return normalizeBinaryPath(s.ffmpegPath, "ffmpeg")
 }
 
 func (s *Service) FFprobePath() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.ffprobePath
+	return normalizeBinaryPath(s.ffprobePath, "ffprobe")
 }
 
 func (s *Service) UpdatePaths(ffmpegPath string, ffprobePath string) {
@@ -233,4 +233,39 @@ func runCombined(ctx context.Context, bin string, args ...string) (string, error
 		return out.String(), fmt.Errorf("%w: %s", err, out.String())
 	}
 	return out.String(), nil
+}
+
+func normalizeBinaryPath(path string, tool string) string {
+	value := strings.TrimSpace(strings.Trim(path, "\""))
+	if value == "" {
+		return defaultToolBinaryName(tool)
+	}
+	info, err := os.Stat(value)
+	if err == nil && info.IsDir() {
+		candidate := filepath.Join(value, defaultToolBinaryName(tool))
+		if candidateInfo, candidateErr := os.Stat(candidate); candidateErr == nil && !candidateInfo.IsDir() {
+			return candidate
+		}
+		// Keep the joined candidate even if it does not exist yet; this is
+		// still more useful than trying to exec a directory path.
+		return candidate
+	}
+	if runtime.GOOS == "windows" && filepath.Ext(value) == "" {
+		candidate := value + ".exe"
+		if candidateInfo, candidateErr := os.Stat(candidate); candidateErr == nil && !candidateInfo.IsDir() {
+			return candidate
+		}
+	}
+	return value
+}
+
+func defaultToolBinaryName(tool string) string {
+	name := strings.TrimSpace(tool)
+	if name == "" {
+		name = "ffmpeg"
+	}
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(name), ".exe") {
+		return name + ".exe"
+	}
+	return name
 }

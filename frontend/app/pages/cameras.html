@@ -16,16 +16,20 @@
       <p class="soft-note">按普通用户流程：先发现设备 → 补充账号密码 → 一键保存 → 推流/拼屏直接复用。</p>
       <div id="roleTip" class="role-tip"></div>
       <div class="stepper">
-        <div id="cameraStep1" class="stepper-item active">
-          <span>① 发现设备</span>
+        <div id="cameraStep0" class="stepper-item active">
+          <span>0. 扫描 FFmpeg</span>
           <span class="badge badge-info">进行中</span>
         </div>
+        <div id="cameraStep1" class="stepper-item">
+          <span>1. 发现设备</span>
+          <span class="badge badge-neutral">待完成</span>
+        </div>
         <div id="cameraStep2" class="stepper-item">
-          <span>② 保存到库</span>
+          <span>2. 保存到库</span>
           <span class="badge badge-neutral">待完成</span>
         </div>
         <div id="cameraStep3" class="stepper-item">
-          <span>③ 套用推流</span>
+          <span>3. 套用推流</span>
           <span class="badge badge-neutral">待完成</span>
         </div>
       </div>
@@ -63,8 +67,18 @@
       </div>
       <div class="actions">
         <button id="btnDiscoverOnvif">扫描 ONVIF（局域网）</button>
-        <button id="btnProbeOnvifProfiles">读取 ONVIF Profiles</button>
+        <button id="btnProbeOnvifProfiles">读取 ONVIF 配置档</button>
+        <button id="btnAutoDetectFFmpeg">扫描并自动保存 FFmpeg 路径</button>
+        <button id="btnSaveFFmpegPath">保存手动输入的 FFmpeg 路径</button>
         <button id="btnDiscoverUsb">读取 USB 列表</button>
+      </div>
+      <div class="grid two">
+        <label>FFmpeg 路径（可手动输入）
+          <input id="cameraFFmpegPathInput" placeholder="Windows 示例: C:\path\to\ffmpeg.exe 或 C:\path\to\data；Linux 示例: /opt/ffmpeg/ffmpeg 或 /opt/ffmpeg" />
+        </label>
+        <label>说明
+          <input value="自动扫描会保存并回填；扫描不到时请手动输入 FFmpeg 二进制路径或目录后再点按钮保存。" readonly />
+        </label>
       </div>
     </section>
 
@@ -152,7 +166,7 @@
             <input id="cameraOnvifEndpoint" placeholder="http://ip/onvif/device_service" />
           </label>
           <label>ProfileToken（可选）
-            <input id="cameraOnvifProfileToken" placeholder="可从“读取 ONVIF Profiles”获得" />
+            <input id="cameraOnvifProfileToken" placeholder="可从“读取 ONVIF 配置档”获得" />
           </label>
         </div>
         <div class="grid two">
@@ -171,16 +185,24 @@
       <div id="panelUSB" class="soft-panel panel-hidden">
         <h3>USB 摄像头配置</h3>
         <div class="grid two">
-          <label>设备名
+          <label>设备名（快速选择）
+            <select id="cameraUsbNameSelect">
+              <option value="">（读取 USB 列表后可选择）</option>
+              <option value="__manual__">其他（手动输入）</option>
+            </select>
+          </label>
+          <label id="cameraUsbNameManualWrap" style="display:none;">手动输入设备名
             <input id="cameraUsbName" placeholder="HD Pro Webcam C920 或 /dev/video0" />
           </label>
+        </div>
+        <div class="grid two">
           <label>分辨率
             <input id="cameraUsbResolution" value="1280x720" />
           </label>
+          <label>帧率（fps）
+            <input id="cameraUsbFps" type="number" value="30" />
+          </label>
         </div>
-        <label>帧率（fps）
-          <input id="cameraUsbFps" type="number" value="30" />
-        </label>
       </div>
 
       <div class="actions">
@@ -202,15 +224,15 @@
           </label>
         </div>
         <div class="grid two">
-          <label>Preview protocol
+          <label>预览协议
             <select id="cameraPreviewMode">
-              <option value="auto" selected>Auto (RTSP/ONVIF prefer WebRTC)</option>
+              <option value="auto" selected>自动（RTSP/ONVIF 优先 WebRTC）</option>
               <option value="webrtc">WebRTC</option>
               <option value="mjpeg">MJPEG</option>
             </select>
           </label>
-          <label>Note
-            <input value="For RTSP/ONVIF, WebRTC is usually smoother and lower latency." readonly />
+          <label>说明
+            <input value="RTSP/ONVIF 通常建议优先 WebRTC，延迟更低更流畅。" readonly />
           </label>
         </div>
         <div class="actions">
@@ -288,6 +310,7 @@
     let flashCameraId = 0;
     let onvifAutoProbeTimer = null;
     let onvifLastProbeKey = "";
+    const USB_NAME_MANUAL_OPTION = "__manual__";
 
     function boolValue(id) {
       return String(document.getElementById(id).value || "").toLowerCase() === "true";
@@ -301,6 +324,75 @@
 
     function textValue(id) {
       return String(document.getElementById(id).value || "").trim();
+    }
+
+    function fillUsbDeviceNameSelect(names) {
+      const select = document.getElementById("cameraUsbNameSelect");
+      if (!select) return;
+      const currentName = currentUsbDeviceName();
+      const normalized = [];
+      const seen = new Set();
+      for (const raw of Array.isArray(names) ? names : []) {
+        const name = String(raw || "").trim();
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
+        normalized.push(name);
+      }
+      select.innerHTML = '<option value="">（请选择 USB 摄像头）</option>';
+      for (const name of normalized) {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        select.appendChild(opt);
+      }
+      const otherOpt = document.createElement("option");
+      otherOpt.value = USB_NAME_MANUAL_OPTION;
+      otherOpt.textContent = "其他（手动输入）";
+      select.appendChild(otherOpt);
+      setUsbDeviceNameValue(currentName);
+    }
+
+    function currentUsbDeviceName() {
+      const selected = textValue("cameraUsbNameSelect");
+      if (selected && selected !== USB_NAME_MANUAL_OPTION) {
+        return selected;
+      }
+      return textValue("cameraUsbName");
+    }
+
+    function setUsbDeviceNameValue(name) {
+      const value = String(name || "").trim();
+      const select = document.getElementById("cameraUsbNameSelect");
+      const manualInput = document.getElementById("cameraUsbName");
+      if (!select || !manualInput) return;
+      manualInput.value = value;
+      if (!value) {
+        select.value = "";
+        updateUsbDeviceNameMode();
+        return;
+      }
+      const exists = Array.from(select.options).some((opt) => opt.value === value);
+      if (exists) {
+        select.value = value;
+      } else {
+        select.value = USB_NAME_MANUAL_OPTION;
+      }
+      updateUsbDeviceNameMode();
+      if (select.value !== USB_NAME_MANUAL_OPTION) {
+        manualInput.value = select.value;
+      }
+    }
+
+    function updateUsbDeviceNameMode() {
+      const select = document.getElementById("cameraUsbNameSelect");
+      const manualWrap = document.getElementById("cameraUsbNameManualWrap");
+      const manualInput = document.getElementById("cameraUsbName");
+      if (!select || !manualWrap || !manualInput) return;
+      const manual = select.value === USB_NAME_MANUAL_OPTION;
+      manualWrap.style.display = manual ? "" : "none";
+      if (!manual && select.value) {
+        manualInput.value = select.value;
+      }
     }
 
     function syncQuickToOnvifForm(preferQuick) {
@@ -382,7 +474,7 @@
       onvifRtspInput.value = data.rtspUrl || "";
       onvifRtspInput.dataset.autoFilled = "0";
       syncOnvifFormToQuick();
-      document.getElementById("cameraUsbName").value = data.usbDeviceName || "";
+      setUsbDeviceNameValue(data.usbDeviceName || "");
       document.getElementById("cameraUsbResolution").value = data.usbDeviceResolution || "1280x720";
       document.getElementById("cameraUsbFps").value = String(data.usbDeviceFramerate || 30);
       switchTypePanels();
@@ -411,7 +503,7 @@
         onvifUsername: textValue("cameraOnvifUsername"),
         onvifPassword: document.getElementById("cameraOnvifPassword").value || "",
         onvifProfileToken: textValue("cameraOnvifProfileToken"),
-        usbDeviceName: textValue("cameraUsbName"),
+        usbDeviceName: currentUsbDeviceName(),
         usbDeviceResolution: textValue("cameraUsbResolution"),
         usbDeviceFramerate: numberValue("cameraUsbFps", 30)
       };
@@ -720,6 +812,8 @@
         body: JSON.stringify({ ids: [id] })
       });
       showJSON("cameraBox", result);
+      fillUsbDeviceNameSelect([]);
+      updateUsbDeviceNameMode();
       resetForm("rtsp");
       setStepState(2, false);
       setStepState(3, false);
@@ -842,8 +936,55 @@
       if (!silent) {
         const hasRTSP = Array.isArray(items) && items.some((item) => String((item && item.rtspUrl) || "").trim() !== "");
         if (!hasRTSP) {
-          showToast("已读取 ONVIF Profiles，但设备拒绝 GetStreamUri；请确认账号权限，或手动填写 RTSP 地址。", "info");
+          showToast("已读取 ONVIF 配置档，但设备拒绝 GetStreamUri；请确认账号权限，或手动填写 RTSP 地址。", "info");
         }
+      }
+      return result;
+    }
+
+    function guessFFprobePathByFFmpegPath(ffmpegPath) {
+      const value = String(ffmpegPath || "").trim();
+      if (!value) return "";
+      if (/ffmpeg\.exe$/i.test(value)) {
+        return value.replace(/ffmpeg\.exe$/i, "ffprobe.exe");
+      }
+      if (/[\\/]ffmpeg$/i.test(value)) {
+        return value.replace(/ffmpeg$/i, "ffprobe");
+      }
+      const trimmed = value.replace(/[\\/]+$/, "");
+      if (!trimmed) return "";
+      const isWindowsPath = /^[A-Za-z]:\\/.test(trimmed) || trimmed.includes("\\");
+      const sep = isWindowsPath ? "\\" : "/";
+      const binary = isWindowsPath ? "ffprobe.exe" : "ffprobe";
+      return `${trimmed}${sep}${binary}`;
+    }
+
+    async function saveFFmpegPathByInput(path) {
+      const ffmpegPath = String(path || "").trim();
+      if (!ffmpegPath) {
+        throw new Error("请先输入 FFmpeg 二进制路径或目录");
+      }
+      const payload = { ffmpegPath };
+      const guessedFFprobe = guessFFprobePathByFFmpegPath(ffmpegPath);
+      if (guessedFFprobe) {
+        payload.ffprobePath = guessedFFprobe;
+      }
+      const result = await requestJSON("/api/v1/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const cfg = ((result || {}).data || {}).config || {};
+      document.getElementById("cameraFFmpegPathInput").value = String(cfg.ffmpegPath || ffmpegPath);
+      return result;
+    }
+
+    async function loadFFmpegPathInput() {
+      const result = await requestJSON("/api/v1/config");
+      const cfg = ((result || {}).data || {}).config || {};
+      const value = String(cfg.ffmpegPath || "").trim();
+      if (value) {
+        document.getElementById("cameraFFmpegPathInput").value = value;
       }
       return result;
     }
@@ -854,6 +995,7 @@
       const list = document.getElementById("discoveredUsbList");
       list.innerHTML = '<option value="">（请选择 USB 摄像头）</option>';
       const videos = (result && result.data && result.data.video) || [];
+      fillUsbDeviceNameSelect(videos.map((item) => (item && item.name) || ""));
       for (const item of videos) {
         const name = (item && item.name) || "";
         if (!name) continue;
@@ -863,8 +1005,53 @@
         list.appendChild(opt);
       }
       setStepState(1, true);
+      setStepState(2, false);
     }
 
+    async function autoDetectFFmpegPath() {
+      const manualPath = textValue("cameraFFmpegPathInput");
+      try {
+        const result = await requestJSON("/api/v1/config/ffmpeg/auto-detect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}"
+        });
+        showJSON("cameraBox", result);
+        const data = (result && result.data) || {};
+        const ffmpegPath = String(data.ffmpegPath || "").trim();
+        if (ffmpegPath) {
+          document.getElementById("cameraFFmpegPathInput").value = ffmpegPath;
+          showToast(`FFmpeg 路径已自动保存：${ffmpegPath}`, "success");
+        } else {
+          showToast("自动扫描完成，但未返回可用路径", "info");
+        }
+        setStepState(0, true);
+        setStepState(1, false);
+        return result;
+      } catch (error) {
+        if (!manualPath) {
+          throw new Error(`自动扫描失败：${error.message || String(error)}。请手动输入 FFmpeg 路径后再次点击该按钮保存。`);
+        }
+        const saved = await saveFFmpegPathByInput(manualPath);
+        showJSON("cameraBox", saved);
+        showToast(`已按手动路径保存：${manualPath}`, "success");
+        setStepState(0, true);
+        setStepState(1, false);
+        return saved;
+      }
+    }
+
+    async function saveFFmpegPathManually() {
+      const manualPath = textValue("cameraFFmpegPathInput");
+      const saved = await saveFFmpegPathByInput(manualPath);
+      showJSON("cameraBox", saved);
+      showToast(`FFmpeg 路径已保存：${manualPath}`, "success");
+      setStepState(0, true);
+      setStepState(1, false);
+      return saved;
+    }
+
+    document.getElementById("cameraUsbNameSelect").onchange = updateUsbDeviceNameMode;
     document.getElementById("cameraType").onchange = switchTypePanels;
     document.getElementById("onvifQuickEndpoint").onchange = () => { syncQuickToOnvifForm(true); scheduleOnvifAutoProbe(); };
     document.getElementById("onvifQuickUsername").onchange = () => { syncQuickToOnvifForm(true); scheduleOnvifAutoProbe(); };
@@ -888,7 +1075,7 @@
       document.getElementById("cameraOnvifEndpoint").value = endpoint;
       document.getElementById("onvifQuickEndpoint").value = endpoint;
       if (!textValue("cameraName")) {
-        document.getElementById("cameraName").value = "ONVIF Camera";
+        document.getElementById("cameraName").value = "ONVIF 摄像头";
       }
       switchTypePanels();
       scheduleOnvifAutoProbe();
@@ -897,9 +1084,9 @@
       const deviceName = textValue("discoveredUsbList");
       if (!deviceName) return;
       document.getElementById("cameraType").value = "usb";
-      document.getElementById("cameraUsbName").value = deviceName;
+      setUsbDeviceNameValue(deviceName);
       if (!textValue("cameraName")) {
-        document.getElementById("cameraName").value = "USB Camera";
+        document.getElementById("cameraName").value = "USB 摄像头";
       }
       switchTypePanels();
     };
@@ -911,6 +1098,8 @@
     bindAction("btnDiscoverOnvif", discoverOnvif, "cameraBox");
     bindAction("btnProbeOnvifProfiles", probeOnvifProfiles, "cameraBox");
     bindAction("btnDiscoverUsb", discoverUsb, "cameraBox");
+    bindAction("btnAutoDetectFFmpeg", autoDetectFFmpegPath, "cameraBox", { successToast: false });
+    bindAction("btnSaveFFmpegPath", saveFFmpegPathManually, "cameraBox", { successToast: false });
     bindAction("btnCameraNew", async () => {
       resetForm("rtsp");
       showJSON("cameraBox", { code: 0, message: "已重置表单，可新建摄像头", data: {} });
@@ -928,6 +1117,9 @@
       stopCameraPreviewPeer();
     });
 
+    fillUsbDeviceNameSelect([]);
+    updateUsbDeviceNameMode();
+    loadFFmpegPathInput().catch(() => {});
     resetForm("rtsp");
     loadList().catch((error) => showJSON("cameraBox", { code: -1, message: error.message || String(error) }));
   </script>
