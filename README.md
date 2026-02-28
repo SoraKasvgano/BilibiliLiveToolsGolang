@@ -2,6 +2,10 @@
 
 Go rewrite of BilibiliLiveTools (backend + frontend), focused on Bilibili live streaming orchestration with FFmpeg.
 
+## Quick Start
+- [下载对应架构的直播工具](https://github.com/SoraKasvgano/BilibiliLiveToolsGolang/releases)
+- [下载对应架构的ffmpeg放到程序data目录下](https://github.com/SoraKasvgano/BilibiliLiveToolsGolang/releases/tag/ffmpeg)
+
 ## 1. 项目简介
 
 `BilibiliLiveToolsGover` 是对原 C# 工具[BilibiliLiveTools](https://github.com/withsalt/BilibiliLiveTools)的 Go 重写版本，侧重点：
