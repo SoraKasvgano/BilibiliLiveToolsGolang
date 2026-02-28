@@ -128,15 +128,18 @@ func defaultBinaryNameByOS(tool string) string {
 }
 
 func searchBinaryInCommonRoots(binaryName string, maxDepth int) string {
-	roots := make([]string, 0, 4)
-	if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
-		roots = append(roots, wd)
-	}
-	roots = append(roots, ".")
+	roots := make([]string, 0, 2)
 	if exePath, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exePath)
-		roots = append(roots, exeDir)
-		roots = append(roots, filepath.Dir(exeDir))
+		if strings.TrimSpace(exeDir) != "" {
+			roots = append(roots, exeDir)
+		}
+	}
+	// Strict scope: only executable directory and its subdirectories.
+	if len(roots) == 0 {
+		if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
+			roots = append(roots, wd)
+		}
 	}
 	return searchBinaryInRoots(binaryName, roots, maxDepth)
 }
@@ -297,10 +300,15 @@ func expandBinaryCandidates(paths ...string) []string {
 		if cleanPath == "." || cleanPath == "" {
 			continue
 		}
-		candidates = append(candidates, cleanPath)
-		if exeDir != "" && !filepath.IsAbs(cleanPath) {
-			candidates = append(candidates, filepath.Join(exeDir, cleanPath))
+		if filepath.IsAbs(cleanPath) {
+			candidates = append(candidates, cleanPath)
+			continue
 		}
+		if exeDir != "" {
+			candidates = append(candidates, filepath.Join(exeDir, cleanPath))
+			continue
+		}
+		candidates = append(candidates, cleanPath)
 	}
 	return candidates
 }

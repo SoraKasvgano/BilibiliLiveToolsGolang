@@ -36,6 +36,46 @@
     </section>
 
     <section class="page-card">
+      <h2>0. FFmpeg 检测与安装</h2>
+      <div class="grid two">
+        <label>FFmpeg 路径（可手动输入）
+          <input id="cameraFFmpegPathInput" placeholder="Windows 示例: C:\path\to\ffmpeg.exe 或 C:\path\to\目录；Linux 示例: /opt/ffmpeg/ffmpeg 或 /opt/ffmpeg" />
+        </label>
+        <label>CDN 加速预设
+          <select id="cameraFFmpegCdnPreset">
+            <option value="">不使用（直连 GitHub）</option>
+            <option value="https://gh-proxy.org/" selected>gh-proxy.org</option>
+            <option value="https://hk.gh-proxy.org/">hk.gh-proxy.org</option>
+            <option value="https://gitproxy.click/">gitproxy.click</option>
+            <option value="__custom__">自定义</option>
+          </select>
+        </label>
+      </div>
+      <div id="cameraFFmpegCdnCustomWrap" class="panel-hidden">
+        <label>自定义 CDN 前缀
+          <input id="cameraFFmpegCdnCustom" placeholder="例如：https://gh-proxy.org/" />
+        </label>
+      </div>
+      <div class="actions">
+        <button id="btnAutoDetectFFmpeg">扫描并自动保存 FFmpeg 路径</button>
+        <button id="btnInstallFFmpegCamera">自动下载并安装 FFmpeg</button>
+        <button id="btnSaveFFmpegPath">保存手动输入的 FFmpeg 路径</button>
+      </div>
+      <div class="upload-progress">
+        <div class="progress-bar"><span id="cameraFFmpegProgressValue" class="progress-value"></span></div>
+        <div id="cameraFFmpegProgressText" class="soft-note">等待执行 FFmpeg 检测或安装任务</div>
+        <div id="cameraFFmpegStageList" class="ffmpeg-stage-list">
+          <span class="badge badge-neutral" data-stage="detect">检测</span>
+          <span class="badge badge-neutral" data-stage="download">下载</span>
+          <span class="badge badge-neutral" data-stage="extract">解压</span>
+          <span class="badge badge-neutral" data-stage="verify">校验</span>
+          <span class="badge badge-neutral" data-stage="save">保存</span>
+        </div>
+      </div>
+      <p class="soft-note">自动扫描会保存并回填；扫描不到时可手动输入并保存，也可自动下载安装到 data 目录（压缩包会自动清理）。</p>
+    </section>
+
+    <section class="page-card">
       <h2>一步发现设备</h2>
       <div class="grid two">
         <label>发现到的 ONVIF 设备
@@ -68,17 +108,7 @@
       <div class="actions">
         <button id="btnDiscoverOnvif">扫描 ONVIF（局域网）</button>
         <button id="btnProbeOnvifProfiles">读取 ONVIF 配置档</button>
-        <button id="btnAutoDetectFFmpeg">扫描并自动保存 FFmpeg 路径</button>
-        <button id="btnSaveFFmpegPath">保存手动输入的 FFmpeg 路径</button>
         <button id="btnDiscoverUsb">读取 USB 列表</button>
-      </div>
-      <div class="grid two">
-        <label>FFmpeg 路径（可手动输入）
-          <input id="cameraFFmpegPathInput" placeholder="Windows 示例: C:\path\to\ffmpeg.exe 或 C:\path\to\data；Linux 示例: /opt/ffmpeg/ffmpeg 或 /opt/ffmpeg" />
-        </label>
-        <label>说明
-          <input value="自动扫描会保存并回填；扫描不到时请手动输入 FFmpeg 二进制路径或目录后再点按钮保存。" readonly />
-        </label>
       </div>
     </section>
 
@@ -324,6 +354,66 @@
 
     function textValue(id) {
       return String(document.getElementById(id).value || "").trim();
+    }
+
+    const CAMERA_FFMPEG_STAGE_ORDER = ["detect", "download", "extract", "verify", "save"];
+
+    function setCameraFFmpegProgress(progress, message, stage) {
+      const percent = Math.max(0, Math.min(100, Number(progress || 0)));
+      const bar = document.getElementById("cameraFFmpegProgressValue");
+      const text = document.getElementById("cameraFFmpegProgressText");
+      if (bar) {
+        bar.style.width = `${percent}%`;
+      }
+      if (text) {
+        text.textContent = String(message || "").trim() || "...";
+      }
+      const wrap = document.getElementById("cameraFFmpegStageList");
+      if (!wrap) return;
+      const active = String(stage || "").trim();
+      const activeIndex = CAMERA_FFMPEG_STAGE_ORDER.indexOf(active);
+      wrap.querySelectorAll("[data-stage]").forEach((node) => {
+        const key = String(node.getAttribute("data-stage") || "").trim();
+        const idx = CAMERA_FFMPEG_STAGE_ORDER.indexOf(key);
+        node.classList.remove("badge-success", "badge-info", "badge-neutral");
+        if (percent >= 100) {
+          node.classList.add("badge-success");
+        } else if (activeIndex >= 0 && idx < activeIndex) {
+          node.classList.add("badge-success");
+        } else if (activeIndex >= 0 && idx == activeIndex) {
+          node.classList.add("badge-info");
+        } else {
+          node.classList.add("badge-neutral");
+        }
+      });
+    }
+
+    function applyCameraFFmpegProgressList(list) {
+      const steps = Array.isArray(list) ? list : [];
+      if (!steps.length) return;
+      let progress = 0;
+      let message = "";
+      let stage = "";
+      for (const step of steps) {
+        const p = Number((step && step.progress) || 0);
+        if (Number.isFinite(p)) progress = Math.max(progress, p);
+        if (step && step.message) message = String(step.message || "").trim() || message;
+        if (step && step.stage) stage = String(step.stage || "").trim() || stage;
+      }
+      setCameraFFmpegProgress(progress, message || "ok", stage || "detect");
+    }
+
+    function updateCameraFFmpegCdnCustomVisibility() {
+      const value = textValue("cameraFFmpegCdnPreset");
+      setPanelVisible("cameraFFmpegCdnCustomWrap", value === "__custom__");
+    }
+
+    function currentCameraFFmpegCDNPrefix() {
+      const value = textValue("cameraFFmpegCdnPreset");
+      if (value === "__custom__") {
+        return textValue("cameraFFmpegCdnCustom");
+      }
+      return value;
     }
 
     function fillUsbDeviceNameSelect(names) {
@@ -985,6 +1075,9 @@
       const value = String(cfg.ffmpegPath || "").trim();
       if (value) {
         document.getElementById("cameraFFmpegPathInput").value = value;
+        setCameraFFmpegProgress(100, `当前配置已保存：${value}`, "save");
+      } else {
+        setCameraFFmpegProgress(0, "尚未配置 FFmpeg 路径", "detect");
       }
       return result;
     }
@@ -1009,7 +1102,7 @@
     }
 
     async function autoDetectFFmpegPath() {
-      const manualPath = textValue("cameraFFmpegPathInput");
+      setCameraFFmpegProgress(20, "正在扫描 FFmpeg 路径...", "detect");
       try {
         const result = await requestJSON("/api/v1/config/ffmpeg/auto-detect", {
           method: "POST",
@@ -1021,31 +1114,312 @@
         const ffmpegPath = String(data.ffmpegPath || "").trim();
         if (ffmpegPath) {
           document.getElementById("cameraFFmpegPathInput").value = ffmpegPath;
-          showToast(`FFmpeg 路径已自动保存：${ffmpegPath}`, "success");
+          showToast("FFmpeg 路径扫描成功：" + ffmpegPath, "success");
+          setCameraFFmpegProgress(100, "已自动回填路径：" + ffmpegPath, "save");
         } else {
-          showToast("自动扫描完成，但未返回可用路径", "info");
+          showToast("未扫描到 FFmpeg，请手动输入路径后保存", "info");
         }
         setStepState(0, true);
         setStepState(1, false);
         return result;
       } catch (error) {
-        if (!manualPath) {
-          throw new Error(`自动扫描失败：${error.message || String(error)}。请手动输入 FFmpeg 路径后再次点击该按钮保存。`);
+        const message = error.message || String(error);
+        setCameraFFmpegProgress(0, "扫描失败：" + message, "detect");
+        throw new Error("自动扫描失败：" + message + "。请手动输入 FFmpeg 二进制路径后点击“保存 FFmpeg 路径”。");
+      }
+    }
+
+    const CAMERA_INSTALL_TASK_STORAGE_KEY = "gover_ffmpeg_install_task";
+    let cameraInstallRunning = false;
+    let cameraInstallTaskId = "";
+    let cameraInstallWatchPromise = null;
+
+    function setCameraInstallButtonState() {
+      const btn = document.getElementById("btnInstallFFmpegCamera");
+      if (!btn) return;
+      if (cameraInstallRunning) {
+        btn.textContent = "取消下载并安装 FFmpeg";
+      } else {
+        btn.textContent = "自动下载并安装 FFmpeg";
+      }
+    }
+
+    function rememberCameraInstallTask(taskId) {
+      const value = String(taskId || "").trim();
+      if (!value) return;
+      localStorage.setItem(CAMERA_INSTALL_TASK_STORAGE_KEY, value);
+    }
+
+    function clearRememberedCameraInstallTask() {
+      localStorage.removeItem(CAMERA_INSTALL_TASK_STORAGE_KEY);
+    }
+
+    function getRememberedCameraInstallTask() {
+      return String(localStorage.getItem(CAMERA_INSTALL_TASK_STORAGE_KEY) || "").trim();
+    }
+
+    function isCameraInstallTaskDone(task) {
+      const status = String((task && task.status) || "").trim().toLowerCase();
+      return status === "succeeded" || status === "failed" || status === "cancelled";
+    }
+
+    function applyCameraInstallTaskState(task) {
+      const current = task || {};
+      if (Array.isArray(current.progress) && current.progress.length) {
+        applyCameraFFmpegProgressList(current.progress);
+      }
+      const stage = String(current.stage || "").trim() || "detect";
+      const percent = Number(current.percent || 0);
+      const message = String(current.message || "").trim() || "处理中...";
+      setCameraFFmpegProgress(Number.isFinite(percent) ? percent : 0, message, stage);
+      const ffmpegPath = String(current.ffmpegPath || "").trim();
+      if (ffmpegPath) {
+        document.getElementById("cameraFFmpegPathInput").value = ffmpegPath;
+      }
+    }
+
+    async function queryCameraInstallTask(taskId) {
+      const result = await requestJSON("/api/v1/config/ffmpeg/install/status?taskId=" + encodeURIComponent(taskId));
+      return (result && result.data) || {};
+    }
+
+    async function monitorCameraInstallTaskBySSE(taskId) {
+      const token = (window.GoverShared && typeof window.GoverShared.getAuthToken === "function")
+        ? window.GoverShared.getAuthToken()
+        : "";
+      const headers = { Accept: "text/event-stream" };
+      if (token) {
+        headers.Authorization = "Bearer " + token;
+      }
+      const response = await fetch("/api/v1/config/ffmpeg/install/stream?taskId=" + encodeURIComponent(taskId), {
+        method: "GET",
+        headers,
+        credentials: "same-origin"
+      });
+      if (!response.ok) {
+        throw new Error("SSE HTTP " + response.status);
+      }
+      if (!response.body || !response.body.getReader) {
+        throw new Error("浏览器不支持 SSE 流读取");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+      let lastData = null;
+
+      while (true) {
+        const part = await reader.read();
+        const done = part.done;
+        const value = part.value;
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        let splitAt = buffer.indexOf("\n\n");
+        while (splitAt >= 0) {
+          const chunk = buffer.slice(0, splitAt).trim();
+          buffer = buffer.slice(splitAt + 2);
+          splitAt = buffer.indexOf("\n\n");
+          if (!chunk || chunk.startsWith(":")) {
+            continue;
+          }
+
+          let eventName = "message";
+          const dataLines = [];
+          for (const line of chunk.split("\n")) {
+            if (line.startsWith("event:")) {
+              eventName = line.slice(6).trim() || "message";
+            } else if (line.startsWith("data:")) {
+              dataLines.push(line.slice(5).trimStart());
+            }
+          }
+          if (!dataLines.length) {
+            continue;
+          }
+
+          let payload = null;
+          try {
+            payload = JSON.parse(dataLines.join("\n"));
+          } catch {
+            continue;
+          }
+
+          if (eventName === "error") {
+            throw new Error((payload && payload.message) || "SSE 返回错误");
+          }
+
+          const data = payload && payload.task ? payload : { task: payload };
+          const task = data.task || {};
+          applyCameraInstallTaskState(task);
+          lastData = data;
+          if (data.done || eventName === "done" || isCameraInstallTaskDone(task)) {
+            return data;
+          }
         }
-        const saved = await saveFFmpegPathByInput(manualPath);
-        showJSON("cameraBox", saved);
-        showToast(`已按手动路径保存：${manualPath}`, "success");
-        setStepState(0, true);
-        setStepState(1, false);
-        return saved;
+      }
+
+      if (lastData && isCameraInstallTaskDone(lastData.task || {})) {
+        return lastData;
+      }
+      throw new Error("SSE 已结束但任务未完成");
+    }
+
+    async function monitorCameraInstallTaskByPolling(taskId) {
+      const deadline = Date.now() + 30 * 60 * 1000;
+      while (Date.now() < deadline) {
+        const data = await queryCameraInstallTask(taskId);
+        const task = data.task || {};
+        applyCameraInstallTaskState(task);
+        if (data.done || isCameraInstallTaskDone(task)) {
+          return data;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 900));
+      }
+      throw new Error("安装任务超时，请稍后重试");
+    }
+
+    async function monitorCameraInstallTask(taskId) {
+      try {
+        return await monitorCameraInstallTaskBySSE(taskId);
+      } catch (sseError) {
+        showToast("SSE 连接失败，自动回退到轮询：" + (sseError.message || String(sseError)), "info");
+        return await monitorCameraInstallTaskByPolling(taskId);
+      }
+    }
+
+    async function watchCameraInstallTask(taskId) {
+      if (cameraInstallWatchPromise) {
+        return cameraInstallWatchPromise;
+      }
+      cameraInstallRunning = true;
+      cameraInstallTaskId = String(taskId || "").trim();
+      rememberCameraInstallTask(cameraInstallTaskId);
+      setCameraInstallButtonState();
+
+      cameraInstallWatchPromise = (async () => {
+        let finalData = null;
+        try {
+          finalData = await monitorCameraInstallTask(cameraInstallTaskId);
+        } catch (monitorError) {
+          try {
+            const fallback = await queryCameraInstallTask(cameraInstallTaskId);
+            if (fallback && fallback.task && isCameraInstallTaskDone(fallback.task)) {
+              finalData = fallback;
+            } else {
+              throw monitorError;
+            }
+          } catch {
+            throw monitorError;
+          }
+        }
+
+        showJSON("cameraBox", { code: 0, message: "ok", data: finalData });
+        const task = (finalData && finalData.task) || {};
+        applyCameraInstallTaskState(task);
+
+        const status = String(task.status || "").toLowerCase();
+        if (status === "succeeded") {
+          const ffmpegPath = String(task.ffmpegPath || "").trim();
+          if (ffmpegPath) {
+            document.getElementById("cameraFFmpegPathInput").value = ffmpegPath;
+          }
+          showToast("FFmpeg 安装完成：" + (ffmpegPath || "(未返回路径)"), "success");
+          setStepState(0, true);
+          setStepState(1, false);
+        } else if (status === "cancelled") {
+          showToast("已取消 FFmpeg 下载与安装", "info");
+        } else {
+          throw new Error(String(task.error || task.message || "FFmpeg 安装失败"));
+        }
+
+        clearRememberedCameraInstallTask();
+        return finalData;
+      })();
+
+      try {
+        return await cameraInstallWatchPromise;
+      } finally {
+        cameraInstallWatchPromise = null;
+        cameraInstallRunning = false;
+        cameraInstallTaskId = "";
+        setCameraInstallButtonState();
+      }
+    }
+
+    async function startCameraInstallTask() {
+      setCameraFFmpegProgress(12, "正在创建安装任务...", "detect");
+      const startResult = await requestJSON("/api/v1/config/ffmpeg/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cdnPrefix: currentCameraFFmpegCDNPrefix() })
+      });
+      const startData = (startResult && startResult.data) || {};
+      const taskId = String(startData.taskId || "").trim();
+      if (!taskId) {
+        throw new Error("安装任务创建失败：缺少任务 ID");
+      }
+      if (startData.task) {
+        applyCameraInstallTaskState(startData.task);
+      }
+      showJSON("cameraBox", startResult);
+      return taskId;
+    }
+
+    async function cancelCameraInstallTask() {
+      const taskId = String(cameraInstallTaskId || getRememberedCameraInstallTask()).trim();
+      if (!taskId) {
+        throw new Error("没有可取消的安装任务");
+      }
+      const result = await requestJSON("/api/v1/config/ffmpeg/install/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId })
+      });
+      const data = (result && result.data) || {};
+      if (data.task) {
+        applyCameraInstallTaskState(data.task);
+      }
+      showJSON("cameraBox", result);
+      return result;
+    }
+
+    async function onCameraInstallButtonClick() {
+      if (cameraInstallRunning) {
+        await cancelCameraInstallTask();
+        return;
+      }
+      const taskId = await startCameraInstallTask();
+      await watchCameraInstallTask(taskId);
+    }
+
+    async function resumeCameraInstallTaskIfNeeded() {
+      const taskId = getRememberedCameraInstallTask();
+      if (!taskId) return;
+      try {
+        const data = await queryCameraInstallTask(taskId);
+        const task = data.task || {};
+        applyCameraInstallTaskState(task);
+        if (data.done || isCameraInstallTaskDone(task)) {
+          clearRememberedCameraInstallTask();
+          setCameraInstallButtonState();
+          return;
+        }
+        showToast("检测到未完成的 FFmpeg 安装任务，正在恢复进度...", "info");
+        await watchCameraInstallTask(taskId);
+      } catch (error) {
+        clearRememberedCameraInstallTask();
+        setCameraInstallButtonState();
+        showToast("恢复任务失败：" + (error.message || String(error)), "error");
       }
     }
 
     async function saveFFmpegPathManually() {
       const manualPath = textValue("cameraFFmpegPathInput");
+      setCameraFFmpegProgress(35, "正在保存手动输入路径...", "verify");
       const saved = await saveFFmpegPathByInput(manualPath);
       showJSON("cameraBox", saved);
-      showToast(`FFmpeg 路径已保存：${manualPath}`, "success");
+      showToast("FFmpeg 路径已保存：" + manualPath, "success");
+      setCameraFFmpegProgress(100, "FFmpeg 路径已保存：" + manualPath, "save");
       setStepState(0, true);
       setStepState(1, false);
       return saved;
@@ -1053,6 +1427,7 @@
 
     document.getElementById("cameraUsbNameSelect").onchange = updateUsbDeviceNameMode;
     document.getElementById("cameraType").onchange = switchTypePanels;
+    document.getElementById("cameraFFmpegCdnPreset").onchange = updateCameraFFmpegCdnCustomVisibility;
     document.getElementById("onvifQuickEndpoint").onchange = () => { syncQuickToOnvifForm(true); scheduleOnvifAutoProbe(); };
     document.getElementById("onvifQuickUsername").onchange = () => { syncQuickToOnvifForm(true); scheduleOnvifAutoProbe(); };
     document.getElementById("onvifQuickPassword").onchange = () => { syncQuickToOnvifForm(true); scheduleOnvifAutoProbe(); };
@@ -1100,6 +1475,7 @@
     bindAction("btnDiscoverUsb", discoverUsb, "cameraBox");
     bindAction("btnAutoDetectFFmpeg", autoDetectFFmpegPath, "cameraBox", { successToast: false });
     bindAction("btnSaveFFmpegPath", saveFFmpegPathManually, "cameraBox", { successToast: false });
+    document.getElementById("btnInstallFFmpegCamera").onclick = () => { onCameraInstallButtonClick().catch((error) => { showToast(error.message || String(error), "error"); showJSON("cameraBox", { code: -1, message: error.message || String(error), data: error.payload || null }); }); };
     bindAction("btnCameraNew", async () => {
       resetForm("rtsp");
       showJSON("cameraBox", { code: 0, message: "已重置表单，可新建摄像头", data: {} });
@@ -1118,8 +1494,11 @@
     });
 
     fillUsbDeviceNameSelect([]);
+    updateCameraFFmpegCdnCustomVisibility();
+    setCameraInstallButtonState();
     updateUsbDeviceNameMode();
     loadFFmpegPathInput().catch(() => {});
+    resumeCameraInstallTaskIfNeeded().catch(() => {});
     resetForm("rtsp");
     loadList().catch((error) => showJSON("cameraBox", { code: -1, message: error.message || String(error) }));
   </script>

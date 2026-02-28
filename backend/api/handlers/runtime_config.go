@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,12 +14,13 @@ import (
 )
 
 type runtimeConfigModule struct {
-	deps *router.Dependencies
+	deps         *router.Dependencies
+	installTasks *ffmpegInstallTaskManager
 }
 
 func init() {
 	router.Register(func(deps *router.Dependencies) router.Module {
-		return &runtimeConfigModule{deps: deps}
+		return &runtimeConfigModule{deps: deps, installTasks: defaultFFmpegInstallTaskManager}
 	})
 }
 
@@ -31,6 +34,10 @@ func (m *runtimeConfigModule) Routes() []router.Route {
 		{Method: http.MethodPost, Pattern: "/config", Summary: "Save runtime config and hot reload", Handler: m.saveConfig},
 		{Method: http.MethodPost, Pattern: "/config/reload", Summary: "Reload config from file", Handler: m.reloadConfig},
 		{Method: http.MethodPost, Pattern: "/config/ffmpeg/auto-detect", Summary: "Auto detect ffmpeg/ffprobe path and save", Handler: m.autoDetectFFmpeg},
+		{Method: http.MethodPost, Pattern: "/config/ffmpeg/install", Summary: "Create ffmpeg install task", Handler: m.installFFmpeg},
+		{Method: http.MethodGet, Pattern: "/config/ffmpeg/install/status", Summary: "Get ffmpeg install task status", Handler: m.installFFmpegStatus},
+		{Method: http.MethodGet, Pattern: "/config/ffmpeg/install/stream", Summary: "Stream ffmpeg install task progress", Handler: m.installFFmpegStream},
+		{Method: http.MethodPost, Pattern: "/config/ffmpeg/install/cancel", Summary: "Cancel ffmpeg install task", Handler: m.cancelFFmpegInstall},
 	}
 }
 
@@ -135,6 +142,47 @@ func (m *runtimeConfigModule) autoDetectFFmpeg(w http.ResponseWriter, r *http.Re
 		"ffmpegPath":     saved.FFmpegPath,
 		"ffprobePath":    saved.FFprobePath,
 		"hotReloadNotes": runtimeHotReloadNotes(),
+	})
+}
+
+func (m *runtimeConfigModule) installFFmpeg(w http.ResponseWriter, r *http.Request) {
+	if m.deps.ConfigMgr == nil {
+		httpapi.Error(w, -1, "config manager not available", http.StatusOK)
+		return
+	}
+	if m.installTasks == nil {
+		httpapi.Error(w, -1, "install task manager not available", http.StatusOK)
+		return
+	}
+
+	type installRequest struct {
+		CDNPrefix string `json:"cdnPrefix"`
+	}
+	req := installRequest{}
+	if err := httpapi.DecodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		httpapi.Error(w, -1, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	cfg := m.deps.ConfigMgr.Current()
+	task, err := m.installTasks.Create(strings.TrimSpace(req.CDNPrefix))
+	if err != nil {
+		httpapi.Error(w, -1, fmt.Sprintf("create ffmpeg install task failed: %v", err), http.StatusOK)
+		return
+	}
+
+	go m.runFFmpegInstallTask(task.ID, cfg.DataDir, strings.TrimSpace(req.CDNPrefix))
+
+	base := strings.TrimSpace(m.deps.Config.APIBase)
+	if base == "" {
+		base = "/api/v1"
+	}
+	httpapi.OK(w, map[string]any{
+		"taskId":    task.ID,
+		"task":      task,
+		"statusUrl": base + "/config/ffmpeg/install/status?taskId=" + task.ID,
+		"streamUrl": base + "/config/ffmpeg/install/stream?taskId=" + task.ID,
+		"cancelUrl": base + "/config/ffmpeg/install/cancel",
 	})
 }
 

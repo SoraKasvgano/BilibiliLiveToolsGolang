@@ -720,6 +720,13 @@ pre.json-collapsed {
   color: #334155;
 }
 
+.ffmpeg-stage-list {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .progress-bar {
   height: 8px;
   border-radius: 999px;
