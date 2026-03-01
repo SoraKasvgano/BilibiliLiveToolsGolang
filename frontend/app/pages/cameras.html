@@ -65,6 +65,8 @@
       <div class="upload-progress">
         <div class="progress-bar"><span id="cameraFFmpegProgressValue" class="progress-value"></span></div>
         <div id="cameraFFmpegProgressText" class="soft-note">等待执行 FFmpeg 检测或安装任务</div>
+        <div id="cameraFFmpegTaskId" class="soft-note">当前安装任务 ID：-</div>
+        <div id="cameraFFmpegRouteLabel" class="soft-note">本次下载线路：-</div>
         <div id="cameraFFmpegStageList" class="ffmpeg-stage-list">
           <span class="badge badge-neutral" data-stage="detect">检测</span>
           <span class="badge badge-neutral" data-stage="download">下载</span>
@@ -1146,14 +1148,82 @@
       }
     }
 
+    function setCameraInstallTaskLabel(taskId) {
+      const el = document.getElementById("cameraFFmpegTaskId");
+      if (!el) return;
+      const value = String(taskId || "").trim();
+      el.textContent = value ? `当前安装任务 ID：${value}` : "当前安装任务 ID：-";
+    }
+
+    function setCameraInstallRouteLabel(route) {
+      const el = document.getElementById("cameraFFmpegRouteLabel");
+      if (!el) return;
+      const value = normalizeCameraInstallRouteLabel(route);
+      el.textContent = value ? `本次下载线路：${value}` : "本次下载线路：-";
+    }
+
+    function normalizeCameraInstallRouteLabel(route) {
+      const value = String(route || "").trim();
+      if (!value) return "";
+      if (value === "__auto__" || value.toLowerCase() === "auto") {
+        return "自动（测速中）";
+      }
+      if (value === "direct-github" || value.toLowerCase() === "github") {
+        return "直连 GitHub";
+      }
+      if (value === "https://gh-proxy.org/") {
+        return "gh-proxy.org";
+      }
+      if (value === "https://hk.gh-proxy.org/") {
+        return "hk.gh-proxy.org";
+      }
+      if (value === "https://gitproxy.click/") {
+        return "gitproxy.click";
+      }
+      return value;
+    }
+
+    function resolveCameraInstallRouteByURL(urlValue) {
+      const value = String(urlValue || "").trim();
+      if (!value) return "";
+      if (value.startsWith("https://gh-proxy.org/")) return "gh-proxy.org";
+      if (value.startsWith("https://hk.gh-proxy.org/")) return "hk.gh-proxy.org";
+      if (value.startsWith("https://gitproxy.click/")) return "gitproxy.click";
+      if (value.includes("github.com/SoraKasvgano/BilibiliLiveToolsGolang/releases/download/ffmpeg/")) {
+        return "直连 GitHub";
+      }
+      return value;
+    }
+
+    function extractCameraInstallRoute(task) {
+      const current = task || {};
+      const routeByURL = resolveCameraInstallRouteByURL(
+        (current.install && (current.install.downloadUrl || current.install.sourceUrl))
+        || current.downloadUrl
+        || ""
+      );
+      if (routeByURL) return routeByURL;
+      const progress = Array.isArray(current.progress) ? current.progress : [];
+      for (let i = progress.length - 1; i >= 0; i -= 1) {
+        const msg = String((progress[i] && progress[i].message) || "").trim();
+        if (!msg) continue;
+        const match = msg.match(/Selected download route:\s*(.+)$/i) || msg.match(/\u5df2\u9009\u62e9\u4e0b\u8f7d\u7ebf\u8def[:\uFF1A]\s*(.+)$/);
+        if (match && match[1]) {
+          return String(match[1] || "").trim();
+        }
+      }
+      return normalizeCameraInstallRouteLabel(current.cdnPrefix || current.CDNPrefix || "");
+    }
     function rememberCameraInstallTask(taskId) {
       const value = String(taskId || "").trim();
       if (!value) return;
       localStorage.setItem(CAMERA_INSTALL_TASK_STORAGE_KEY, value);
+      setCameraInstallTaskLabel(value);
     }
 
     function clearRememberedCameraInstallTask() {
       localStorage.removeItem(CAMERA_INSTALL_TASK_STORAGE_KEY);
+      setCameraInstallTaskLabel("");
     }
 
     function getRememberedCameraInstallTask() {
@@ -1193,6 +1263,7 @@
         percent: Number(current.percent || 0),
         message: String(current.message || "").trim(),
         ffmpegPath: String(current.ffmpegPath || "").trim(),
+        route: normalizeCameraInstallRouteLabel(current.selectedRoute || current.route || extractCameraInstallRoute(current)),
         progress: Array.isArray(current.progress) ? current.progress : []
       });
     }
@@ -1209,6 +1280,7 @@
         percent: Number(snapshot.percent || 0),
         message: snapshot.message || "正在恢复任务进度...",
         ffmpegPath: snapshot.ffmpegPath || "",
+        selectedRoute: snapshot.route || "",
         progress: Array.isArray(snapshot.progress) ? snapshot.progress : []
       });
       return taskId;
@@ -1232,6 +1304,13 @@
       if (ffmpegPath) {
         document.getElementById("cameraFFmpegPathInput").value = ffmpegPath;
       }
+      const taskId = String(current.taskId || cameraInstallTaskId || getRememberedCameraInstallTask()).trim();
+      if (taskId) {
+        cameraInstallTaskId = taskId;
+        setCameraInstallTaskLabel(taskId);
+      }
+      const route = normalizeCameraInstallRouteLabel(current.selectedRoute || current.route || extractCameraInstallRoute(current));
+      setCameraInstallRouteLabel(route);
       persistCameraInstallTaskState(current);
     }
 
@@ -1414,10 +1493,11 @@
 
     async function startCameraInstallTask() {
       setCameraFFmpegProgress(12, "正在创建安装任务...", "detect");
+      const requestedPrefix = currentCameraFFmpegCDNPrefix();
       const startResult = await requestJSON("/api/v1/config/ffmpeg/install", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cdnPrefix: currentCameraFFmpegCDNPrefix() })
+        body: JSON.stringify({ cdnPrefix: requestedPrefix })
       });
       const startData = (startResult && startResult.data) || {};
       const taskId = String(startData.taskId || "").trim();
@@ -1433,7 +1513,8 @@
           status: "pending",
           stage: "detect",
           percent: 12,
-          message: "安装任务已创建"
+          message: "安装任务已创建",
+          route: normalizeCameraInstallRouteLabel(requestedPrefix),
         });
       }
       showJSON("cameraBox", startResult);
@@ -1500,8 +1581,13 @@
       setCameraFFmpegProgress(35, "正在保存手动输入路径...", "verify");
       const saved = await saveFFmpegPathByInput(manualPath);
       showJSON("cameraBox", saved);
-      showToast("FFmpeg 路径已保存：" + manualPath, "success");
-      setCameraFFmpegProgress(100, "FFmpeg 路径已保存：" + manualPath, "save");
+      const data = (saved && saved.data) || {};
+      const resolvedPath = String(data.ffmpegPath || ((data.config || {}).ffmpegPath) || manualPath).trim();
+      if (resolvedPath) {
+        document.getElementById("cameraFFmpegPathInput").value = resolvedPath;
+      }
+      showToast("FFmpeg 路径已保存：" + (resolvedPath || manualPath), "success");
+      setCameraFFmpegProgress(100, "FFmpeg 路径已保存：" + (resolvedPath || manualPath), "save");
       setStepState(0, true);
       setStepState(1, false);
       return saved;
@@ -1578,6 +1664,9 @@
     fillUsbDeviceNameSelect([]);
     updateCameraFFmpegCdnCustomVisibility();
     setCameraInstallButtonState();
+    setCameraInstallTaskLabel(getRememberedCameraInstallTask());
+    const cameraInstallSnapshot = getRememberedCameraInstallTaskState();
+    setCameraInstallRouteLabel((cameraInstallSnapshot && cameraInstallSnapshot.route) || "");
     updateUsbDeviceNameMode();
     loadFFmpegPathInput().catch(() => {});
     resumeCameraInstallTaskIfNeeded().catch(() => {});

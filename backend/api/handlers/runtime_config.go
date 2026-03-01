@@ -427,7 +427,7 @@ func runtimeHotReloadNotes() []string {
 func resolveManualBinaryPath(inputPath string, tool string) (string, error) {
 	value := strings.TrimSpace(strings.Trim(inputPath, "\""))
 	if value == "" {
-		return "", fmt.Errorf("missing %s path", tool)
+		return "", fmt.Errorf("请先输入 %s 路径", tool)
 	}
 	if abs, err := filepath.Abs(value); err == nil {
 		value = abs
@@ -437,14 +437,17 @@ func resolveManualBinaryPath(inputPath string, tool string) (string, error) {
 		if fi.IsDir() {
 			candidate := filepath.Join(value, manualBinaryName(tool))
 			if !isExistingFile(candidate) {
-				return "", fmt.Errorf("binary not found under directory: %s", candidate)
+				return "", fmt.Errorf("目录中未找到 %s 可执行文件: %s", tool, candidate)
 			}
 			return candidate, nil
 		}
 		return value, nil
 	}
+	if errors.Is(err, os.ErrPermission) {
+		return "", fmt.Errorf("没有权限访问路径: %s", value)
+	}
 	if !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("stat path failed: %v", err)
+		return "", fmt.Errorf("读取路径失败: %v", err)
 	}
 	if runtime.GOOS == "windows" && filepath.Ext(value) == "" {
 		exePath := value + ".exe"
@@ -452,7 +455,7 @@ func resolveManualBinaryPath(inputPath string, tool string) (string, error) {
 			return exePath, nil
 		}
 	}
-	return "", fmt.Errorf("path does not exist: %s", value)
+	return "", fmt.Errorf("路径不存在: %s", value)
 }
 
 func detectSiblingBinaryPath(ffmpegPath string, tool string) string {
