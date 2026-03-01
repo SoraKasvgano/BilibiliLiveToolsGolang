@@ -43,8 +43,9 @@
         </label>
         <label>CDN 加速预设
           <select id="cameraFFmpegCdnPreset">
+            <option value="__auto__" selected>自动（测速后选择最快）</option>
             <option value="">不使用（直连 GitHub）</option>
-            <option value="https://gh-proxy.org/" selected>gh-proxy.org</option>
+            <option value="https://gh-proxy.org/">gh-proxy.org</option>
             <option value="https://hk.gh-proxy.org/">hk.gh-proxy.org</option>
             <option value="https://gitproxy.click/">gitproxy.click</option>
             <option value="__custom__">自定义</option>
@@ -1059,7 +1060,7 @@
       if (guessedFFprobe) {
         payload.ffprobePath = guessedFFprobe;
       }
-      const result = await requestJSON("/api/v1/config", {
+      const result = await requestJSON("/api/v1/config/ffmpeg/manual-save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -1130,6 +1131,7 @@
     }
 
     const CAMERA_INSTALL_TASK_STORAGE_KEY = "gover_ffmpeg_install_task";
+    const CAMERA_INSTALL_TASK_STATE_STORAGE_KEY = "gover_ffmpeg_install_task_state";
     let cameraInstallRunning = false;
     let cameraInstallTaskId = "";
     let cameraInstallWatchPromise = null;
@@ -1158,6 +1160,60 @@
       return String(localStorage.getItem(CAMERA_INSTALL_TASK_STORAGE_KEY) || "").trim();
     }
 
+    function rememberCameraInstallTaskState(snapshot) {
+      try {
+        localStorage.setItem(CAMERA_INSTALL_TASK_STATE_STORAGE_KEY, JSON.stringify(snapshot || {}));
+      } catch {
+      }
+    }
+
+    function clearRememberedCameraInstallTaskState() {
+      localStorage.removeItem(CAMERA_INSTALL_TASK_STATE_STORAGE_KEY);
+    }
+
+    function getRememberedCameraInstallTaskState() {
+      const raw = String(localStorage.getItem(CAMERA_INSTALL_TASK_STATE_STORAGE_KEY) || "").trim();
+      if (!raw) return null;
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function persistCameraInstallTaskState(task) {
+      const current = task || {};
+      const taskId = String(current.taskId || cameraInstallTaskId || getRememberedCameraInstallTask()).trim();
+      if (!taskId) return;
+      rememberCameraInstallTaskState({
+        taskId,
+        status: String(current.status || "").trim(),
+        stage: String(current.stage || "").trim(),
+        percent: Number(current.percent || 0),
+        message: String(current.message || "").trim(),
+        ffmpegPath: String(current.ffmpegPath || "").trim(),
+        progress: Array.isArray(current.progress) ? current.progress : []
+      });
+    }
+
+    function restoreCameraInstallTaskState() {
+      const snapshot = getRememberedCameraInstallTaskState();
+      if (!snapshot) return "";
+      const taskId = String(snapshot.taskId || "").trim();
+      if (!taskId) return "";
+      applyCameraInstallTaskState({
+        taskId,
+        status: snapshot.status || "running",
+        stage: snapshot.stage || "detect",
+        percent: Number(snapshot.percent || 0),
+        message: snapshot.message || "正在恢复任务进度...",
+        ffmpegPath: snapshot.ffmpegPath || "",
+        progress: Array.isArray(snapshot.progress) ? snapshot.progress : []
+      });
+      return taskId;
+    }
+
     function isCameraInstallTaskDone(task) {
       const status = String((task && task.status) || "").trim().toLowerCase();
       return status === "succeeded" || status === "failed" || status === "cancelled";
@@ -1176,6 +1232,7 @@
       if (ffmpegPath) {
         document.getElementById("cameraFFmpegPathInput").value = ffmpegPath;
       }
+      persistCameraInstallTaskState(current);
     }
 
     async function queryCameraInstallTask(taskId) {
@@ -1326,13 +1383,22 @@
           showToast("FFmpeg 安装完成：" + (ffmpegPath || "(未返回路径)"), "success");
           setStepState(0, true);
           setStepState(1, false);
-        } else if (status === "cancelled") {
+          clearRememberedCameraInstallTask();
+          clearRememberedCameraInstallTaskState();
+          return finalData;
+        }
+        if (status === "cancelled") {
           showToast("已取消 FFmpeg 下载与安装", "info");
-        } else {
+          clearRememberedCameraInstallTask();
+          clearRememberedCameraInstallTaskState();
+          return finalData;
+        }
+        if (status === "failed") {
+          clearRememberedCameraInstallTask();
+          clearRememberedCameraInstallTaskState();
           throw new Error(String(task.error || task.message || "FFmpeg 安装失败"));
         }
 
-        clearRememberedCameraInstallTask();
         return finalData;
       })();
 
@@ -1358,8 +1424,17 @@
       if (!taskId) {
         throw new Error("安装任务创建失败：缺少任务 ID");
       }
+      rememberCameraInstallTask(taskId);
       if (startData.task) {
         applyCameraInstallTaskState(startData.task);
+      } else {
+        persistCameraInstallTaskState({
+          taskId,
+          status: "pending",
+          stage: "detect",
+          percent: 12,
+          message: "安装任务已创建"
+        });
       }
       showJSON("cameraBox", startResult);
       return taskId;
@@ -1393,23 +1468,30 @@
     }
 
     async function resumeCameraInstallTaskIfNeeded() {
-      const taskId = getRememberedCameraInstallTask();
+      const snapshotTaskId = restoreCameraInstallTaskState();
+      const taskId = getRememberedCameraInstallTask() || snapshotTaskId;
       if (!taskId) return;
+      rememberCameraInstallTask(taskId);
       try {
         const data = await queryCameraInstallTask(taskId);
         const task = data.task || {};
         applyCameraInstallTaskState(task);
         if (data.done || isCameraInstallTaskDone(task)) {
           clearRememberedCameraInstallTask();
+          clearRememberedCameraInstallTaskState();
           setCameraInstallButtonState();
           return;
         }
         showToast("检测到未完成的 FFmpeg 安装任务，正在恢复进度...", "info");
         await watchCameraInstallTask(taskId);
       } catch (error) {
-        clearRememberedCameraInstallTask();
+        const msg = error.message || String(error);
+        if (msg.includes("not found") || msg.includes("不存在") || msg.includes("install task")) {
+          clearRememberedCameraInstallTask();
+          clearRememberedCameraInstallTaskState();
+        }
         setCameraInstallButtonState();
-        showToast("恢复任务失败：" + (error.message || String(error)), "error");
+        showToast("恢复任务失败：" + msg, "error");
       }
     }
 

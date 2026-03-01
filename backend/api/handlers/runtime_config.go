@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -34,6 +37,7 @@ func (m *runtimeConfigModule) Routes() []router.Route {
 		{Method: http.MethodPost, Pattern: "/config", Summary: "Save runtime config and hot reload", Handler: m.saveConfig},
 		{Method: http.MethodPost, Pattern: "/config/reload", Summary: "Reload config from file", Handler: m.reloadConfig},
 		{Method: http.MethodPost, Pattern: "/config/ffmpeg/auto-detect", Summary: "Auto detect ffmpeg/ffprobe path and save", Handler: m.autoDetectFFmpeg},
+		{Method: http.MethodPost, Pattern: "/config/ffmpeg/manual-save", Summary: "Validate and save manual ffmpeg path", Handler: m.saveFFmpegManualPath},
 		{Method: http.MethodPost, Pattern: "/config/ffmpeg/install", Summary: "Create ffmpeg install task", Handler: m.installFFmpeg},
 		{Method: http.MethodGet, Pattern: "/config/ffmpeg/install/status", Summary: "Get ffmpeg install task status", Handler: m.installFFmpegStatus},
 		{Method: http.MethodGet, Pattern: "/config/ffmpeg/install/stream", Summary: "Stream ffmpeg install task progress", Handler: m.installFFmpegStream},
@@ -134,6 +138,75 @@ func (m *runtimeConfigModule) autoDetectFFmpeg(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		httpapi.Error(w, -1, err.Error(), http.StatusOK)
 		return
+	}
+	httpapi.OK(w, map[string]any{
+		"updated":        true,
+		"config":         saved,
+		"configFile":     saved.ConfigFile,
+		"ffmpegPath":     saved.FFmpegPath,
+		"ffprobePath":    saved.FFprobePath,
+		"hotReloadNotes": runtimeHotReloadNotes(),
+	})
+}
+
+func (m *runtimeConfigModule) saveFFmpegManualPath(w http.ResponseWriter, r *http.Request) {
+	if m.deps.ConfigMgr == nil {
+		httpapi.Error(w, -1, "config manager not available", http.StatusOK)
+		return
+	}
+	type saveReq struct {
+		FFmpegPath  string `json:"ffmpegPath"`
+		FFprobePath string `json:"ffprobePath"`
+	}
+	req := saveReq{}
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	ffmpegPath, err := resolveManualBinaryPath(req.FFmpegPath, "ffmpeg")
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	ffprobePath := strings.TrimSpace(req.FFprobePath)
+	if ffprobePath != "" {
+		ffprobePath, err = resolveManualBinaryPath(ffprobePath, "ffprobe")
+		if err != nil {
+			httpapi.Error(w, -1, err.Error(), http.StatusBadRequest)
+			return
+		}
+	} else {
+		ffprobePath = detectSiblingBinaryPath(ffmpegPath, "ffprobe")
+	}
+
+	oldCfg := m.deps.ConfigMgr.Current()
+	if ffprobePath == "" && isExistingFile(oldCfg.FFprobePath) {
+		ffprobePath = strings.TrimSpace(oldCfg.FFprobePath)
+	}
+	if strings.TrimSpace(oldCfg.FFmpegPath) == ffmpegPath && strings.TrimSpace(oldCfg.FFprobePath) == ffprobePath {
+		httpapi.OK(w, map[string]any{
+			"updated":        false,
+			"config":         oldCfg,
+			"configFile":     oldCfg.ConfigFile,
+			"ffmpegPath":     oldCfg.FFmpegPath,
+			"ffprobePath":    oldCfg.FFprobePath,
+			"hotReloadNotes": runtimeHotReloadNotes(),
+		})
+		return
+	}
+
+	nextCfg := oldCfg
+	nextCfg.FFmpegPath = ffmpegPath
+	nextCfg.FFprobePath = ffprobePath
+	saved, err := m.deps.ConfigMgr.Save(nextCfg)
+	if err != nil {
+		httpapi.Error(w, -1, err.Error(), http.StatusOK)
+		return
+	}
+	if m.deps.FFmpeg != nil {
+		m.deps.FFmpeg.UpdatePaths(saved.FFmpegPath, saved.FFprobePath)
 	}
 	httpapi.OK(w, map[string]any{
 		"updated":        true,
@@ -349,6 +422,64 @@ func runtimeHotReloadNotes() []string {
 		"GB28181 signaling and media port pool settings can be edited here; runtime service will apply on next start/restart.",
 		"All other fields are persisted, but restart is required before they fully apply.",
 	}
+}
+
+func resolveManualBinaryPath(inputPath string, tool string) (string, error) {
+	value := strings.TrimSpace(strings.Trim(inputPath, "\""))
+	if value == "" {
+		return "", fmt.Errorf("missing %s path", tool)
+	}
+	if abs, err := filepath.Abs(value); err == nil {
+		value = abs
+	}
+	fi, err := os.Stat(value)
+	if err == nil {
+		if fi.IsDir() {
+			candidate := filepath.Join(value, manualBinaryName(tool))
+			if !isExistingFile(candidate) {
+				return "", fmt.Errorf("binary not found under directory: %s", candidate)
+			}
+			return candidate, nil
+		}
+		return value, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("stat path failed: %v", err)
+	}
+	if runtime.GOOS == "windows" && filepath.Ext(value) == "" {
+		exePath := value + ".exe"
+		if isExistingFile(exePath) {
+			return exePath, nil
+		}
+	}
+	return "", fmt.Errorf("path does not exist: %s", value)
+}
+
+func detectSiblingBinaryPath(ffmpegPath string, tool string) string {
+	base := strings.TrimSpace(ffmpegPath)
+	if base == "" {
+		return ""
+	}
+	dir := filepath.Dir(base)
+	if strings.TrimSpace(dir) == "" || dir == "." {
+		return ""
+	}
+	candidate := filepath.Join(dir, manualBinaryName(tool))
+	if isExistingFile(candidate) {
+		return candidate
+	}
+	return ""
+}
+
+func manualBinaryName(tool string) string {
+	name := strings.TrimSpace(tool)
+	if name == "" {
+		name = "ffmpeg"
+	}
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(name), ".exe") {
+		return name + ".exe"
+	}
+	return name
 }
 
 func getString(payload map[string]any, key string) (string, bool) {

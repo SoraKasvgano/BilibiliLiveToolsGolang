@@ -57,8 +57,9 @@
         </label>
         <label>CDN 加速预设
           <select id="pushFFmpegCdnPreset">
+            <option value="__auto__" selected>自动（测速后选择最快）</option>
             <option value="">不使用（直连 GitHub）</option>
-            <option value="https://gh-proxy.org/" selected>gh-proxy.org</option>
+            <option value="https://gh-proxy.org/">gh-proxy.org</option>
             <option value="https://hk.gh-proxy.org/">hk.gh-proxy.org</option>
             <option value="https://gitproxy.click/">gitproxy.click</option>
             <option value="__custom__">自定义</option>
@@ -1336,7 +1337,7 @@
       const payload = { ffmpegPath };
       const guessedFFprobe = guessFFprobePathByFFmpegPathForPush(ffmpegPath);
       if (guessedFFprobe) payload.ffprobePath = guessedFFprobe;
-      const result = await requestJSON("/api/v1/config", {
+      const result = await requestJSON("/api/v1/config/ffmpeg/manual-save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -1396,6 +1397,7 @@
     }
 
     const PUSH_INSTALL_TASK_STORAGE_KEY = "gover_ffmpeg_install_task";
+    const PUSH_INSTALL_TASK_STATE_STORAGE_KEY = "gover_ffmpeg_install_task_state";
     let pushInstallRunning = false;
     let pushInstallTaskId = "";
     let pushInstallWatchPromise = null;
@@ -1424,6 +1426,60 @@
       return String(localStorage.getItem(PUSH_INSTALL_TASK_STORAGE_KEY) || "").trim();
     }
 
+    function rememberPushInstallTaskState(snapshot) {
+      try {
+        localStorage.setItem(PUSH_INSTALL_TASK_STATE_STORAGE_KEY, JSON.stringify(snapshot || {}));
+      } catch {
+      }
+    }
+
+    function clearRememberedPushInstallTaskState() {
+      localStorage.removeItem(PUSH_INSTALL_TASK_STATE_STORAGE_KEY);
+    }
+
+    function getRememberedPushInstallTaskState() {
+      const raw = String(localStorage.getItem(PUSH_INSTALL_TASK_STATE_STORAGE_KEY) || "").trim();
+      if (!raw) return null;
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function persistPushInstallTaskState(task) {
+      const current = task || {};
+      const taskId = String(current.taskId || pushInstallTaskId || getRememberedPushInstallTask()).trim();
+      if (!taskId) return;
+      rememberPushInstallTaskState({
+        taskId,
+        status: String(current.status || "").trim(),
+        stage: String(current.stage || "").trim(),
+        percent: Number(current.percent || 0),
+        message: String(current.message || "").trim(),
+        ffmpegPath: String(current.ffmpegPath || "").trim(),
+        progress: Array.isArray(current.progress) ? current.progress : []
+      });
+    }
+
+    function restorePushInstallTaskState() {
+      const snapshot = getRememberedPushInstallTaskState();
+      if (!snapshot) return "";
+      const taskId = String(snapshot.taskId || "").trim();
+      if (!taskId) return "";
+      applyPushInstallTaskState({
+        taskId,
+        status: snapshot.status || "running",
+        stage: snapshot.stage || "detect",
+        percent: Number(snapshot.percent || 0),
+        message: snapshot.message || "正在恢复任务进度...",
+        ffmpegPath: snapshot.ffmpegPath || "",
+        progress: Array.isArray(snapshot.progress) ? snapshot.progress : []
+      });
+      return taskId;
+    }
+
     function isPushInstallTaskDone(task) {
       const status = String((task && task.status) || "").trim().toLowerCase();
       return status === "succeeded" || status === "failed" || status === "cancelled";
@@ -1442,6 +1498,7 @@
       if (ffmpegPath) {
         document.getElementById("pushFFmpegPathInput").value = ffmpegPath;
       }
+      persistPushInstallTaskState(current);
     }
 
     async function queryPushInstallTask(taskId) {
@@ -1590,13 +1647,22 @@
             document.getElementById("pushFFmpegPathInput").value = ffmpegPath;
           }
           showToast("FFmpeg 安装完成：" + (ffmpegPath || "(未返回路径)"), "success");
-        } else if (status === "cancelled") {
+          clearRememberedPushInstallTask();
+          clearRememberedPushInstallTaskState();
+          return finalData;
+        }
+        if (status === "cancelled") {
           showToast("已取消 FFmpeg 下载与安装", "info");
-        } else {
+          clearRememberedPushInstallTask();
+          clearRememberedPushInstallTaskState();
+          return finalData;
+        }
+        if (status === "failed") {
+          clearRememberedPushInstallTask();
+          clearRememberedPushInstallTaskState();
           throw new Error(String(task.error || task.message || "FFmpeg 安装失败"));
         }
 
-        clearRememberedPushInstallTask();
         return finalData;
       })();
 
@@ -1622,8 +1688,17 @@
       if (!taskId) {
         throw new Error("安装任务创建失败：缺少任务 ID");
       }
+      rememberPushInstallTask(taskId);
       if (startData.task) {
         applyPushInstallTaskState(startData.task);
+      } else {
+        persistPushInstallTaskState({
+          taskId,
+          status: "pending",
+          stage: "detect",
+          percent: 12,
+          message: "安装任务已创建"
+        });
       }
       showJSON("box", startResult);
       return taskId;
@@ -1657,23 +1732,30 @@
     }
 
     async function resumePushInstallTaskIfNeeded() {
-      const taskId = getRememberedPushInstallTask();
+      const snapshotTaskId = restorePushInstallTaskState();
+      const taskId = getRememberedPushInstallTask() || snapshotTaskId;
       if (!taskId) return;
+      rememberPushInstallTask(taskId);
       try {
         const data = await queryPushInstallTask(taskId);
         const task = data.task || {};
         applyPushInstallTaskState(task);
         if (data.done || isPushInstallTaskDone(task)) {
           clearRememberedPushInstallTask();
+          clearRememberedPushInstallTaskState();
           setPushInstallButtonState();
           return;
         }
         showToast("检测到未完成的 FFmpeg 安装任务，正在恢复进度...", "info");
         await watchPushInstallTask(taskId);
       } catch (error) {
-        clearRememberedPushInstallTask();
+        const msg = error.message || String(error);
+        if (msg.includes("not found") || msg.includes("不存在") || msg.includes("install task")) {
+          clearRememberedPushInstallTask();
+          clearRememberedPushInstallTaskState();
+        }
         setPushInstallButtonState();
-        showToast("恢复任务失败：" + (error.message || String(error)), "error");
+        showToast("恢复任务失败：" + msg, "error");
       }
     }
 
