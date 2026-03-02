@@ -80,7 +80,8 @@
         <div class="progress-bar"><span id="pushFFmpegProgressValue" class="progress-value"></span></div>
         <div id="pushFFmpegProgressText" class="soft-note">等待执行 FFmpeg 检测或安装任务</div>
         <div id="pushFFmpegTaskId" class="soft-note">当前安装任务 ID：-</div>
-        <div id="pushFFmpegRouteLabel" class="soft-note">本次下载线路：-</div>
+        <div id="pushFFmpegRouteLabel" class="soft-note ffmpeg-route-label ffmpeg-route-neutral">本次下载线路：-</div>
+        <div id="pushFFmpegDownloadUrlLabel" class="soft-note ffmpeg-download-url">本次下载地址：-</div>
         <div id="pushFFmpegStageList" class="ffmpeg-stage-list">
           <span class="badge badge-neutral" data-stage="detect">检测</span>
           <span class="badge badge-neutral" data-stage="download">下载</span>
@@ -1426,11 +1427,35 @@
       el.textContent = value ? `当前安装任务 ID：${value}` : "当前安装任务 ID：-";
     }
 
-    function setPushInstallRouteLabel(route) {
+    function normalizePushInstallStatus(status) {
+      return String(status || "").trim().toLowerCase();
+    }
+
+    function pushRouteStateClass(status) {
+      const normalized = normalizePushInstallStatus(status);
+      if (normalized === "pending" || normalized === "running") return "ffmpeg-route-running";
+      if (normalized === "succeeded") return "ffmpeg-route-success";
+      if (normalized === "failed" || normalized === "cancelled") return "ffmpeg-route-failed";
+      return "ffmpeg-route-neutral";
+    }
+
+    function setPushInstallRouteLabel(route, status) {
       const el = document.getElementById("pushFFmpegRouteLabel");
       if (!el) return;
       const value = normalizePushInstallRouteLabel(route);
+      el.classList.remove("ffmpeg-route-running", "ffmpeg-route-success", "ffmpeg-route-failed", "ffmpeg-route-neutral");
+      el.classList.add(pushRouteStateClass(status));
       el.textContent = value ? `本次下载线路：${value}` : "本次下载线路：-";
+    }
+
+    function setPushInstallDownloadURLLabel(downloadURL, status) {
+      const el = document.getElementById("pushFFmpegDownloadUrlLabel");
+      if (!el) return;
+      const value = String(downloadURL || "").trim();
+      el.classList.remove("ffmpeg-route-running", "ffmpeg-route-success", "ffmpeg-route-failed", "ffmpeg-route-neutral");
+      el.classList.add(pushRouteStateClass(status));
+      el.textContent = value ? `本次下载地址：${value}` : "本次下载地址：-";
+      el.title = value || "";
     }
 
     function normalizePushInstallRouteLabel(route) {
@@ -1485,6 +1510,19 @@
       }
       return normalizePushInstallRouteLabel(current.cdnPrefix || current.CDNPrefix || "");
     }
+
+    function extractPushInstallDownloadURL(task) {
+      const current = task || {};
+      const install = current.install || {};
+      return String(
+        install.downloadUrl
+        || current.downloadUrl
+        || install.sourceUrl
+        || current.sourceUrl
+        || ""
+      ).trim();
+    }
+
     function rememberPushInstallTask(taskId) {
       const value = String(taskId || "").trim();
       if (!value) return;
@@ -1535,6 +1573,7 @@
         message: String(current.message || "").trim(),
         ffmpegPath: String(current.ffmpegPath || "").trim(),
         route: normalizePushInstallRouteLabel(current.selectedRoute || current.route || extractPushInstallRoute(current)),
+        downloadUrl: extractPushInstallDownloadURL(current),
         progress: Array.isArray(current.progress) ? current.progress : []
       });
     }
@@ -1552,6 +1591,7 @@
         message: snapshot.message || "正在恢复任务进度...",
         ffmpegPath: snapshot.ffmpegPath || "",
         selectedRoute: snapshot.route || "",
+        downloadUrl: snapshot.downloadUrl || "",
         progress: Array.isArray(snapshot.progress) ? snapshot.progress : []
       });
       return taskId;
@@ -1580,8 +1620,11 @@
         pushInstallTaskId = taskId;
         setPushInstallTaskLabel(taskId);
       }
+      const status = normalizePushInstallStatus(current.status);
       const route = normalizePushInstallRouteLabel(current.selectedRoute || current.route || extractPushInstallRoute(current));
-      setPushInstallRouteLabel(route);
+      setPushInstallRouteLabel(route, status);
+      const downloadUrl = extractPushInstallDownloadURL(current);
+      setPushInstallDownloadURLLabel(downloadUrl, status);
       persistPushInstallTaskState(current);
     }
 
@@ -1784,6 +1827,7 @@
           percent: 12,
           message: "安装任务已创建",
           route: normalizePushInstallRouteLabel(requestedPrefix),
+          downloadUrl: "",
         });
       }
       showJSON("box", startResult);
@@ -2160,7 +2204,8 @@
     setPushInstallButtonState();
     setPushInstallTaskLabel(getRememberedPushInstallTask());
     const pushInstallSnapshot = getRememberedPushInstallTaskState();
-    setPushInstallRouteLabel((pushInstallSnapshot && pushInstallSnapshot.route) || "");
+    setPushInstallRouteLabel((pushInstallSnapshot && pushInstallSnapshot.route) || "", (pushInstallSnapshot && pushInstallSnapshot.status) || "");
+    setPushInstallDownloadURLLabel((pushInstallSnapshot && pushInstallSnapshot.downloadUrl) || "", (pushInstallSnapshot && pushInstallSnapshot.status) || "");
     loadFFmpegPathInputForPush().catch(() => {});
     resumePushInstallTaskIfNeeded().catch(() => {});
     loadSetting().catch((error) => showJSON("box", { code: -1, message: error.message || String(error) }));

@@ -66,7 +66,8 @@
         <div class="progress-bar"><span id="cameraFFmpegProgressValue" class="progress-value"></span></div>
         <div id="cameraFFmpegProgressText" class="soft-note">等待执行 FFmpeg 检测或安装任务</div>
         <div id="cameraFFmpegTaskId" class="soft-note">当前安装任务 ID：-</div>
-        <div id="cameraFFmpegRouteLabel" class="soft-note">本次下载线路：-</div>
+        <div id="cameraFFmpegRouteLabel" class="soft-note ffmpeg-route-label ffmpeg-route-neutral">本次下载线路：-</div>
+        <div id="cameraFFmpegDownloadUrlLabel" class="soft-note ffmpeg-download-url">本次下载地址：-</div>
         <div id="cameraFFmpegStageList" class="ffmpeg-stage-list">
           <span class="badge badge-neutral" data-stage="detect">检测</span>
           <span class="badge badge-neutral" data-stage="download">下载</span>
@@ -1155,11 +1156,35 @@
       el.textContent = value ? `当前安装任务 ID：${value}` : "当前安装任务 ID：-";
     }
 
-    function setCameraInstallRouteLabel(route) {
+    function normalizeCameraInstallStatus(status) {
+      return String(status || "").trim().toLowerCase();
+    }
+
+    function cameraRouteStateClass(status) {
+      const normalized = normalizeCameraInstallStatus(status);
+      if (normalized === "pending" || normalized === "running") return "ffmpeg-route-running";
+      if (normalized === "succeeded") return "ffmpeg-route-success";
+      if (normalized === "failed" || normalized === "cancelled") return "ffmpeg-route-failed";
+      return "ffmpeg-route-neutral";
+    }
+
+    function setCameraInstallRouteLabel(route, status) {
       const el = document.getElementById("cameraFFmpegRouteLabel");
       if (!el) return;
       const value = normalizeCameraInstallRouteLabel(route);
+      el.classList.remove("ffmpeg-route-running", "ffmpeg-route-success", "ffmpeg-route-failed", "ffmpeg-route-neutral");
+      el.classList.add(cameraRouteStateClass(status));
       el.textContent = value ? `本次下载线路：${value}` : "本次下载线路：-";
+    }
+
+    function setCameraInstallDownloadURLLabel(downloadURL, status) {
+      const el = document.getElementById("cameraFFmpegDownloadUrlLabel");
+      if (!el) return;
+      const value = String(downloadURL || "").trim();
+      el.classList.remove("ffmpeg-route-running", "ffmpeg-route-success", "ffmpeg-route-failed", "ffmpeg-route-neutral");
+      el.classList.add(cameraRouteStateClass(status));
+      el.textContent = value ? `本次下载地址：${value}` : "本次下载地址：-";
+      el.title = value || "";
     }
 
     function normalizeCameraInstallRouteLabel(route) {
@@ -1214,6 +1239,19 @@
       }
       return normalizeCameraInstallRouteLabel(current.cdnPrefix || current.CDNPrefix || "");
     }
+
+    function extractCameraInstallDownloadURL(task) {
+      const current = task || {};
+      const install = current.install || {};
+      return String(
+        install.downloadUrl
+        || current.downloadUrl
+        || install.sourceUrl
+        || current.sourceUrl
+        || ""
+      ).trim();
+    }
+
     function rememberCameraInstallTask(taskId) {
       const value = String(taskId || "").trim();
       if (!value) return;
@@ -1264,6 +1302,7 @@
         message: String(current.message || "").trim(),
         ffmpegPath: String(current.ffmpegPath || "").trim(),
         route: normalizeCameraInstallRouteLabel(current.selectedRoute || current.route || extractCameraInstallRoute(current)),
+        downloadUrl: extractCameraInstallDownloadURL(current),
         progress: Array.isArray(current.progress) ? current.progress : []
       });
     }
@@ -1281,6 +1320,7 @@
         message: snapshot.message || "正在恢复任务进度...",
         ffmpegPath: snapshot.ffmpegPath || "",
         selectedRoute: snapshot.route || "",
+        downloadUrl: snapshot.downloadUrl || "",
         progress: Array.isArray(snapshot.progress) ? snapshot.progress : []
       });
       return taskId;
@@ -1309,8 +1349,11 @@
         cameraInstallTaskId = taskId;
         setCameraInstallTaskLabel(taskId);
       }
+      const status = normalizeCameraInstallStatus(current.status);
       const route = normalizeCameraInstallRouteLabel(current.selectedRoute || current.route || extractCameraInstallRoute(current));
-      setCameraInstallRouteLabel(route);
+      setCameraInstallRouteLabel(route, status);
+      const downloadUrl = extractCameraInstallDownloadURL(current);
+      setCameraInstallDownloadURLLabel(downloadUrl, status);
       persistCameraInstallTaskState(current);
     }
 
@@ -1515,6 +1558,7 @@
           percent: 12,
           message: "安装任务已创建",
           route: normalizeCameraInstallRouteLabel(requestedPrefix),
+          downloadUrl: "",
         });
       }
       showJSON("cameraBox", startResult);
@@ -1666,7 +1710,8 @@
     setCameraInstallButtonState();
     setCameraInstallTaskLabel(getRememberedCameraInstallTask());
     const cameraInstallSnapshot = getRememberedCameraInstallTaskState();
-    setCameraInstallRouteLabel((cameraInstallSnapshot && cameraInstallSnapshot.route) || "");
+    setCameraInstallRouteLabel((cameraInstallSnapshot && cameraInstallSnapshot.route) || "", (cameraInstallSnapshot && cameraInstallSnapshot.status) || "");
+    setCameraInstallDownloadURLLabel((cameraInstallSnapshot && cameraInstallSnapshot.downloadUrl) || "", (cameraInstallSnapshot && cameraInstallSnapshot.status) || "");
     updateUsbDeviceNameMode();
     loadFFmpegPathInput().catch(() => {});
     resumeCameraInstallTaskIfNeeded().catch(() => {});

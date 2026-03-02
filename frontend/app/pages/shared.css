@@ -720,6 +720,31 @@ pre.json-collapsed {
   color: #334155;
 }
 
+
+
+.ffmpeg-route-label {
+  font-weight: 600;
+}
+
+.ffmpeg-route-neutral {
+  color: var(--muted);
+}
+
+.ffmpeg-route-running {
+  color: #0c4a6e;
+}
+
+.ffmpeg-route-success {
+  color: #166534;
+}
+
+.ffmpeg-route-failed {
+  color: #991b1b;
+}
+
+.ffmpeg-download-url {
+  word-break: break-all;
+}
 .ffmpeg-stage-list {
   margin-top: 8px;
   display: flex;

@@ -87,7 +87,7 @@ func InstallRelease(ctx context.Context, opts InstallOptions) (*InstallResult, e
 		}
 	}
 
-	emit(InstallStep{Stage: "detect", Progress: 12, Message: fmt.Sprintf("Matched package %s", asset.name)}, true)
+	emit(InstallStep{Stage: "detect", Progress: 12, Message: fmt.Sprintf("已匹配安装包 %s", asset.name)}, true)
 	downloadURL := resolveDownloadURL(ctx, sourceURL, opts.CDNPrefix, emit)
 	result.DownloadURL = downloadURL
 
@@ -112,7 +112,7 @@ func InstallRelease(ctx context.Context, opts InstallOptions) (*InstallResult, e
 		_ = os.Remove(archivePath)
 	}()
 	result.Bytes = downloaded.Size
-	emit(InstallStep{Stage: "download", Progress: 72, Message: fmt.Sprintf("Download complete (%d bytes)", downloaded.Size)}, true)
+	emit(InstallStep{Stage: "download", Progress: 72, Message: fmt.Sprintf("下载完成（%d 字节）", downloaded.Size)}, true)
 
 	extracted, err := ExtractFFmpegArchive(archivePath, installDir)
 	if err != nil {
@@ -120,12 +120,12 @@ func InstallRelease(ctx context.Context, opts InstallOptions) (*InstallResult, e
 	}
 	result.FFmpegPath = extracted.FFmpegPath
 	result.FFprobePath = extracted.FFprobePath
-	emit(InstallStep{Stage: "extract", Progress: 85, Message: "Extraction complete"}, true)
+	emit(InstallStep{Stage: "extract", Progress: 85, Message: "解压完成"}, true)
 
 	if _, err := os.Stat(result.FFmpegPath); err != nil {
 		return nil, err
 	}
-	emit(InstallStep{Stage: "verify", Progress: 95, Message: "Binary verification passed"}, true)
+	emit(InstallStep{Stage: "verify", Progress: 95, Message: "二进制校验通过"}, true)
 
 	return result, nil
 }
@@ -136,17 +136,17 @@ func resolveDownloadURL(ctx context.Context, sourceURL string, prefix string, em
 		return applyCDNPrefix(sourceURL, p)
 	}
 	if emit != nil {
-		emit(InstallStep{Stage: "detect", Progress: 16, Message: "Probing CDN speed..."}, true)
+		emit(InstallStep{Stage: "detect", Progress: 16, Message: "正在测速 CDN 与直连 GitHub..."}, true)
 	}
 	urlValue, label, err := selectBestDownloadURL(ctx, sourceURL)
 	if err != nil {
 		if emit != nil {
-			emit(InstallStep{Stage: "detect", Progress: 20, Message: "CDN auto select failed, fallback to direct GitHub"}, true)
+			emit(InstallStep{Stage: "detect", Progress: 20, Message: "自动测速失败，回退为直连 GitHub"}, true)
 		}
 		return sourceURL
 	}
 	if emit != nil {
-		emit(InstallStep{Stage: "detect", Progress: 20, Message: fmt.Sprintf("Selected download route: %s", label)}, true)
+		emit(InstallStep{Stage: "detect", Progress: 20, Message: fmt.Sprintf("已选择下载线路：%s", label)}, true)
 	}
 	return urlValue
 }
@@ -238,11 +238,11 @@ func buildDownloadStep(progress DownloadProgress) InstallStep {
 	}
 	total := progress.TotalBytes
 	overall := 30
-	message := fmt.Sprintf("Downloading (%s downloaded)", formatBytes(downloaded))
+	message := fmt.Sprintf("下载中（已下载 %s）", formatBytes(downloaded))
 	if total > 0 {
 		percent := clampPercent(progress.Percent)
 		overall = 20 + (percent * 50 / 100)
-		message = fmt.Sprintf("Downloading %d%% (%s / %s)", percent, formatBytes(downloaded), formatBytes(total))
+		message = fmt.Sprintf("下载中 %d%%（%s / %s）", percent, formatBytes(downloaded), formatBytes(total))
 	}
 	overall = clampPercent(overall)
 	if overall < 20 {
