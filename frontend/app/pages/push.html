@@ -222,13 +222,26 @@
         </div>
         <label>帧率（fps）<input id="usbFramerate" type="number" value="30" /></label>
       </div>
-      <label>高级模式 FFmpeg 命令（必须包含 {URL}）
-        <textarea id="ffmpegCommand" rows="3" placeholder="ffmpeg ... -f flv {URL}"></textarea>
-      </label>
-      <div class="actions">
-        <button id="btnFillAdvancedCmd">按输入类型填充推荐命令</button>
+      <input id="ffmpegCommand" type="hidden" value="" />
+      <div class="soft-panel">
+        <h3>高级模式模板</h3>
+        <p class="soft-note">高级模式会按输入源自动生成推流模板，普通用户无需手写 FFmpeg 命令。</p>
+        <div class="grid two">
+          <label>模板策略
+            <select id="ffmpegCommandMode">
+              <option value="auto" selected>自动匹配当前输入源</option>
+              <option value="low_latency">低延迟直播模板</option>
+              <option value="high_quality">高画质稳定模板</option>
+            </select>
+          </label>
+          <label>模板状态
+            <input id="ffmpegCommandHint" value="将根据输入类型自动生成" readonly />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnFillAdvancedCmd">刷新推荐模板</button>
+        </div>
       </div>
-      <p class="soft-note">提示：高级模式命令是“手动托管”，切换输入源不会自动强改你已编辑的命令；可点击上方按钮快速生成模板。</p>
 
       <div class="soft-panel">
         <h3>本地预览（调试画面，不会推到平台）</h3>
@@ -737,9 +750,15 @@
       return lower.includes("-f dshow") || lower.includes("video=\"") || lower.includes("-f v4l2") || lower.includes("/dev/video");
     }
 
-    function recommendedAdvancedCommand(inputType) {
+    function recommendedAdvancedCommand(inputType, mode = "auto") {
       const type = String(inputType || "").toLowerCase();
-      const commonOut = "-vcodec libx264 -pix_fmt yuv420p -r 25 -g 50 -b:v 3500k -maxrate 3500k -bufsize 7000k -preset veryfast -tune zerolatency -f flv {URL}";
+      const profile = String(mode || "auto").toLowerCase();
+      let commonOut = "-vcodec libx264 -pix_fmt yuv420p -r 25 -g 50 -b:v 3500k -maxrate 3500k -bufsize 7000k -preset veryfast -tune zerolatency -f flv {URL}";
+      if (profile === "low_latency") {
+        commonOut = "-vcodec libx264 -pix_fmt yuv420p -r 25 -g 25 -b:v 2500k -maxrate 2500k -bufsize 2500k -preset veryfast -tune zerolatency -f flv {URL}";
+      } else if (profile === "high_quality") {
+        commonOut = "-vcodec libx264 -pix_fmt yuv420p -r 30 -g 60 -b:v 6000k -maxrate 6000k -bufsize 12000k -preset medium -f flv {URL}";
+      }
       if (type === "rtsp" || type === "onvif") {
         return `ffmpeg -rtsp_transport tcp -i \"${type === "onvif" ? "rtsp://user:pass@ip/stream" : "rtsp://user:pass@ip/stream"}\" -an ${commonOut}`;
       }
@@ -760,18 +779,18 @@
 
     function autoSuggestAdvancedCommand() {
       const model = asNumber("model", 1);
-      if (model !== 2) return;
-      const inputType = asText("inputType");
-      const commandEl = document.getElementById("ffmpegCommand");
-      const current = commandEl.value || "";
-      if (!current.trim()) {
-        commandEl.value = recommendedAdvancedCommand(inputType);
+      if (model !== 2) {
+        const hintEl = document.getElementById("ffmpegCommandHint");
+        if (hintEl) hintEl.value = "普通模式无需高级模板";
         return;
       }
-      const networkType = inputType === "rtsp" || inputType === "mjpeg" || inputType === "onvif" || inputType === "rtmp" || inputType === "gb28181";
-      if (networkType && isUsbTemplateCommand(current)) {
-        commandEl.value = recommendedAdvancedCommand(inputType);
-      }
+      const inputType = asText("inputType");
+      const mode = asText("ffmpegCommandMode") || "auto";
+      const commandEl = document.getElementById("ffmpegCommand");
+      if (!commandEl) return;
+      commandEl.value = recommendedAdvancedCommand(inputType, mode);
+      const hintEl = document.getElementById("ffmpegCommandHint");
+      if (hintEl) hintEl.value = "已按当前输入源和策略生成模板";
     }
 
     function cameraTypeLabel(type) {
@@ -1965,6 +1984,7 @@
     }
 
     function buildPayload() {
+      autoSuggestAdvancedCommand();
       const inputType = asText("inputType") || "video";
       const videoId = Number(asText("videoMaterialSelect") || 0);
       const audioId = Number(asText("audioMaterialSelect") || 0);
@@ -2085,6 +2105,7 @@
     document.getElementById("videoMaterialSelect").onchange = updateMaterialHint;
     document.getElementById("audioMaterialSelect").onchange = updateMaterialHint;
     document.getElementById("model").onchange = autoSuggestAdvancedCommand;
+    document.getElementById("ffmpegCommandMode").onchange = autoSuggestAdvancedCommand;
     document.getElementById("resolution").onchange = () => {
       renderMultiInputCanvas();
     };
@@ -2142,8 +2163,8 @@
     bindAction("btnSaveFFmpegPathPush", saveFFmpegPathManuallyForPush, "box", { successToast: false });
     document.getElementById("btnInstallFFmpegPush").onclick = () => { onPushInstallButtonClick().catch((error) => { showToast(error.message || String(error), "error"); showJSON("box", { code: -1, message: error.message || String(error), data: error.payload || null }); }); };
     bindAction("btnFillAdvancedCmd", async () => {
-      document.getElementById("ffmpegCommand").value = recommendedAdvancedCommand(asText("inputType"));
-      showJSON("box", { code: 0, message: "已按当前输入类型填充推荐高级命令" });
+      autoSuggestAdvancedCommand();
+      showJSON("box", { code: 0, message: "已按当前输入源刷新推荐模板" });
     }, "box");
     bindAction("btnStartLocalPreview", startLocalPreview, "box");
     bindAction("btnStopLocalPreview", async () => {

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -218,6 +219,9 @@ func (s *Store) SaveDanmakuConsumerSetting(ctx context.Context, req DanmakuConsu
 	if req.ConfigJSON == "" {
 		req.ConfigJSON = "{}"
 	}
+	if err := validateJSONObject(req.ConfigJSON); err != nil {
+		return nil, fmt.Errorf("invalid consumer configJson: %w", err)
+	}
 	if req.PollIntervalSec <= 0 {
 		req.PollIntervalSec = current.PollIntervalSec
 	}
@@ -267,6 +271,14 @@ func (s *Store) SaveDanmakuConsumerSetting(ctx context.Context, req DanmakuConsu
 		return nil, err
 	}
 	return s.GetDanmakuConsumerSetting(ctx)
+}
+
+func validateJSONObject(raw string) error {
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) UpdateDanmakuConsumerRuntime(ctx context.Context, cursor string, lastErr string, polledAt time.Time) error {

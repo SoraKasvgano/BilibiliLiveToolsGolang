@@ -207,6 +207,7 @@
         <label>RTMP URL<input id="pushRtmpUrl" placeholder="rtmp://ip/app/stream" /></label>
         <label>GB28181 Pull URL<input id="pushGbPullUrl" placeholder="rtsp://zlm/live/340200... or http://.../live.flv" /></label>
       </div>
+      <h3 id="streaming-mosaic" class="nav-anchor">拼屏配置</h3>
       <div class="grid two">
         <label>多路拼屏推流
           <select id="pushMultiEnabled">
@@ -216,16 +217,13 @@
         </label>
         <label>拼屏布局(列x行/聚焦)<input id="pushMultiLayout" value="2x2" placeholder="例如 2x2 / 3x2 / focus" /></label>
       </div>
-      <label>多路源地址(每行一个 RTSP/MJPEG/HTTP 地址，最多9路)
-        <textarea id="pushMultiUrls" rows="4" placeholder="rtsp://cam1/stream&#10;rtsp://cam2/stream"></textarea>
-      </label>
+      <input id="pushMultiUrls" type="hidden" value="" />
       <div class="grid two">
         <label>新增单路源(URL/本地路径)<input id="mosaicNewSourceUrl" placeholder="rtsp://... 或 C:\\videos\\a.mp4" /></label>
         <label>新增标题(可选)<input id="mosaicNewSourceTitle" placeholder="主机位" /></label>
       </div>
       <div class="actions">
         <button id="btnAddMosaicSource">添加到拼屏列表</button>
-        <button id="btnSyncMosaicText">同步回文本框</button>
       </div>
       <label>素材库多选自动填充(视频)
         <select id="mosaicMaterialSelect" multiple size="6"></select>
@@ -277,13 +275,26 @@
         <label>USB 摄像头名称<input id="pushCameraName" placeholder="HD Pro Webcam C920 或 /dev/video0" /></label>
         <label>USB 分辨率<input id="pushCameraResolution" value="1280x720" /></label>
       </div>
-      <label>高级模式 FFmpeg 命令（必须含 {URL}）
-        <textarea id="pushCommand" rows="3" placeholder="ffmpeg ... -f flv {URL}"></textarea>
-      </label>
-      <div class="actions">
-        <button id="btnFillPushCommand">按输入类型填充推荐高级命令</button>
+      <input id="pushCommand" type="hidden" value="" />
+      <div class="sub-card">
+        <h3>高级模式模板</h3>
+        <p class="muted">高级模式会按输入源自动生成安全模板，普通用户无需手写 FFmpeg 命令。</p>
+        <div class="grid two">
+          <label>模板策略
+            <select id="pushCommandMode">
+              <option value="auto" selected>自动匹配当前输入源</option>
+              <option value="low_latency">低延迟直播模板</option>
+              <option value="high_quality">高画质稳定模板</option>
+            </select>
+          </label>
+          <label>模板状态
+            <input id="pushCommandHint" value="将根据输入类型自动生成" readonly />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnFillPushCommand">刷新推荐模板</button>
+        </div>
       </div>
-      <p class="muted">高级模式命令属于手动托管；切换输入类型后可点击该按钮快速切换模板。</p>
       <div class="grid two">
         <label>自动重试
           <select id="pushAutoRetry">
@@ -309,29 +320,65 @@
 
         <section class="section-content" id="section-integration">
     <section class="card">
-      <h2>扩展集成（明文 API Key / 弹幕 PTZ）</h2>
+      <h2>扩展集成（通知密钥 / 弹幕联动）</h2>
       <div class="grid two">
-        <label>API Key 名称<input id="apiKeyName" placeholder="dingtalk / telegram / pushoo / provider_inbound_secret / provider_inbound_whitelist ..." /></label>
-        <label>API Key（明文）<input id="apiKeyValue" /></label>
+        <label>密钥用途
+          <select id="apiKeyPreset">
+            <option value="dingtalk" selected>钉钉机器人</option>
+            <option value="telegram">Telegram Bot</option>
+            <option value="pushoo">Pushoo 服务地址</option>
+            <option value="pushoo_token">Pushoo Token</option>
+            <option value="provider_inbound_secret">入站通用签名密钥</option>
+            <option value="provider_inbound_whitelist">入站来源 IP 白名单</option>
+            <option value="telegram_inbound_secret_token">Telegram 官方 Secret Token</option>
+            <option value="dingtalk_inbound_sign_secret">钉钉官方签名密钥</option>
+            <option value="dingtalk_callback_token">钉钉回调 Token</option>
+            <option value="provider_inbound_skew_sec">入站时间误差秒数</option>
+            <option value="custom">自定义</option>
+          </select>
+        </label>
+        <label>密钥内容（明文保存）<input id="apiKeyValue" /></label>
       </div>
+      <input id="apiKeyName" type="hidden" value="dingtalk" />
+      <label id="apiKeyCustomWrap" class="panel-hidden">自定义密钥名称<input id="apiKeyCustomName" placeholder="例如：my_provider_secret" /></label>
       <label>描述<input id="apiKeyDesc" /></label>
       <div class="actions">
-        <button id="btnSaveApiKey">保存 API Key</button>
-        <button id="btnListApiKey">读取 API Key</button>
+        <button id="btnSaveApiKey">保存密钥</button>
+        <button id="btnListApiKey">读取密钥</button>
       </div>
 
+      <h3 id="integration-danmaku-rules" class="nav-anchor">弹幕规则</h3>
       <div class="grid two">
         <label>弹幕关键词<input id="ruleKeyword" /></label>
-        <label>PTZ 方向<input id="ruleDirection" placeholder="left/right/up/down/center" /></label>
+        <label id="ruleDirectionWrap">云台方向
+          <select id="ruleDirection">
+            <option value="left" selected>左转</option>
+            <option value="right">右转</option>
+            <option value="up">上仰</option>
+            <option value="down">下俯</option>
+            <option value="zoom_in">放大</option>
+            <option value="zoom_out">缩小</option>
+            <option value="home">回到初始位</option>
+            <option value="stop">停止</option>
+          </select>
+        </label>
       </div>
       <div class="grid two">
-        <label>动作<input id="ruleAction" value="ptz" /></label>
-        <label>速度<input id="ruleSpeed" type="number" value="1" /></label>
+        <label>触发动作
+          <select id="ruleAction">
+            <option value="ptz" selected>控制云台</option>
+            <option value="start_live">开始推流</option>
+            <option value="stop_live">停止推流</option>
+            <option value="webhook">发送 Webhook 通知</option>
+          </select>
+        </label>
+        <label id="ruleSpeedWrap">云台速度<input id="ruleSpeed" type="number" value="1" min="0" max="1" step="0.1" /></label>
       </div>
       <div class="actions">
         <button id="btnSaveRule">保存弹幕规则</button>
         <button id="btnListRule">读取弹幕规则</button>
       </div>
+      <h3 id="integration-webhook" class="nav-anchor">Webhook 配置</h3>
       <div class="grid two">
         <label>Webhook 名称<input id="webhookName" placeholder="dingtalk-default" /></label>
         <label>Webhook 地址<input id="webhookUrl" placeholder="https://oapi.dingtalk.com/robot/send?access_token=..." /></label>
@@ -347,8 +394,20 @@
       </div>
       <div class="grid two">
         <label>测试 Webhook ID<input id="webhookTestId" type="number" /></label>
-        <label>测试事件类型<input id="webhookEventType" value="webhook.test" /></label>
+        <label>通知场景
+          <select id="webhookEventPreset">
+            <option value="webhook.test" selected>测试通知</option>
+            <option value="manual.notify">手动广播</option>
+            <option value="bilibili.api.alert">B站 API 告警</option>
+            <option value="danmaku.rule.webhook">弹幕规则触发</option>
+            <option value="live.started">开播事件</option>
+            <option value="live.stopped">关播事件</option>
+            <option value="custom">自定义</option>
+          </select>
+        </label>
       </div>
+      <input id="webhookEventType" type="hidden" value="webhook.test" />
+      <label id="webhookEventCustomWrap" class="panel-hidden">自定义事件名<input id="webhookEventCustom" placeholder="例如：my.custom.event" /></label>
       <div class="actions">
         <button id="btnSaveWebhook">保存 Webhook</button>
         <button id="btnListWebhook">读取 Webhook</button>
@@ -405,13 +464,73 @@
           <option value="">（点击“自动发现 ONVIF 设备”后可选择）</option>
         </select>
       </label>
-      <div class="grid two">
-        <label>Bot Provider<input id="botProvider" value="dingtalk" /></label>
-        <label>Bot Command<input id="botCommand" value="start_live" /></label>
+      <div id="integration-bot" class="sub-card nav-anchor">
+        <h3>机器人命令向导</h3>
+        <p class="muted">选择要执行的动作后，只填写相关参数即可；系统会自动组装后台需要的参数。</p>
+        <div class="grid two">
+          <label>通知通道
+            <select id="botProvider">
+              <option value="dingtalk" selected>钉钉</option>
+              <option value="telegram">Telegram</option>
+              <option value="pushoo">Pushoo</option>
+              <option value="">不发送结果通知</option>
+            </select>
+          </label>
+          <label>执行动作
+            <select id="botCommand">
+              <option value="start_live" selected>开始推流</option>
+              <option value="stop_live">停止推流</option>
+              <option value="ptz">控制云台</option>
+              <option value="send_danmaku">发送直播间弹幕</option>
+              <option value="provider_notify">发送通道通知</option>
+            </select>
+          </label>
+        </div>
+        <div class="grid two">
+          <label>执行后回执
+            <select id="botNotifyResult">
+              <option value="false" selected>不发送</option>
+              <option value="true">发送到所选通道</option>
+            </select>
+          </label>
+          <label>提示
+            <input id="botCommandHint" value="开始/停止推流无需额外参数。" readonly />
+          </label>
+        </div>
+        <div id="botPanelPTZ" class="sub-panel panel-hidden">
+          <div class="grid three">
+            <label>云台动作
+              <select id="botPtzAction">
+                <option value="left">左转</option>
+                <option value="right">右转</option>
+                <option value="up">上仰</option>
+                <option value="down">下俯</option>
+                <option value="zoom_in">放大</option>
+                <option value="zoom_out">缩小</option>
+                <option value="stop">停止</option>
+                <option value="home">回到初始位</option>
+              </select>
+            </label>
+            <label>速度<input id="botPtzSpeed" type="number" value="0.3" min="0" max="1" step="0.1" /></label>
+            <label>持续时间(ms)<input id="botPtzDurationMs" type="number" value="700" min="100" max="10000" /></label>
+          </div>
+        </div>
+        <div id="botPanelDanmaku" class="sub-panel panel-hidden">
+          <div class="grid two">
+            <label>房间号（0=使用已登录房间）
+              <input id="botDanmakuRoomId" type="number" value="0" />
+            </label>
+            <label>弹幕内容
+              <input id="botDanmakuMessage" placeholder="例如：直播开始啦" />
+            </label>
+          </div>
+        </div>
+        <div id="botPanelNotify" class="sub-panel panel-hidden">
+          <label>通知标题<input id="botNotifyTitle" value="[Gover] 通知" /></label>
+          <label>通知内容<textarea id="botNotifyContent" rows="3" placeholder="这里填写要发送到钉钉/Telegram/Pushoo 的内容"></textarea></label>
+        </div>
+        <input id="botParams" type="hidden" value="{}" />
       </div>
-      <label>Bot Params(JSON)
-        <textarea id="botParams" rows="3" placeholder='{"action":"left","speed":0.3} / {"roomId":123,"message":"测试弹幕","notifyResult":true}'></textarea>
-      </label>
       <div class="actions">
         <button id="btnBotCommand">执行机器人命令</button>
       </div>
@@ -454,8 +573,17 @@
       </div>
       <div class="grid two">
         <label>冷却时间(分钟)<input id="biliAlertCooldown" type="number" value="15" /></label>
-        <label>告警事件名<input id="biliAlertEventType" value="bilibili.api.alert" /></label>
+        <label>告警通知场景
+          <select id="biliAlertEventPreset">
+            <option value="bilibili.api.alert" selected>B站 API 告警</option>
+            <option value="manual.notify">手动广播</option>
+            <option value="webhook.test">测试通知</option>
+            <option value="custom">自定义</option>
+          </select>
+        </label>
       </div>
+      <input id="biliAlertEventType" type="hidden" value="bilibili.api.alert" />
+      <label id="biliAlertEventCustomWrap" class="panel-hidden">自定义告警事件名<input id="biliAlertEventCustom" placeholder="例如：bilibili.api.alert" /></label>
       <label>告警开关
         <select id="biliAlertEnabled">
           <option value="true" selected>开启</option>
@@ -486,9 +614,87 @@
         <label>接口地址<input id="consumerEndpoint" placeholder="http://127.0.0.1:19090/api/danmaku/poll" /></label>
         <label>Auth Token<input id="consumerAuthToken" placeholder="可选，Bearer Token" /></label>
       </div>
-      <label>Provider 配置(JSON)
-        <textarea id="consumerConfigJson" rows="4" placeholder='{"roomId":123456,"useWbi":true,"useCookie":true,"preferWss":true,"webLocation":"444.8","wsPath":"/sub"}'></textarea>
-      </label>
+      <div class="sub-card">
+        <h3>Provider 配置向导</h3>
+        <p class="muted">选择协议后填写对应字段，系统会自动生成后台配置。</p>
+        <div id="consumerPanelBilibili" class="sub-panel panel-hidden">
+          <div class="grid two">
+            <label>B站房间号
+              <input id="consumerBiliRoomId" type="number" value="0" />
+            </label>
+            <label>连接方式
+              <select id="consumerBiliPreferWss">
+                <option value="true" selected>优先 WSS（推荐）</option>
+                <option value="false">允许普通 WS</option>
+              </select>
+            </label>
+          </div>
+          <div class="grid three">
+            <label>使用 Cookie
+              <select id="consumerBiliUseCookie">
+                <option value="true" selected>开启</option>
+                <option value="false">关闭</option>
+              </select>
+            </label>
+            <label>使用 WBI 签名
+              <select id="consumerBiliUseWbi">
+                <option value="true" selected>开启</option>
+                <option value="false">关闭</option>
+              </select>
+            </label>
+            <label>监听内容
+              <select id="consumerBiliCommands" multiple size="3">
+                <option value="DANMU_MSG" selected>弹幕消息</option>
+                <option value="SEND_GIFT">礼物消息</option>
+                <option value="SUPER_CHAT_MESSAGE">醒目留言</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div id="consumerPanelHTTP" class="sub-panel">
+          <div class="grid three">
+            <label>请求方式
+              <select id="consumerHttpMethod">
+                <option value="GET" selected>GET</option>
+                <option value="POST">POST</option>
+              </select>
+            </label>
+            <label>鉴权方式
+              <select id="consumerHttpAuthMode">
+                <option value="bearer" selected>Bearer Token</option>
+                <option value="header">自定义 Header</option>
+                <option value="query">URL 参数</option>
+                <option value="body">Body 字段</option>
+                <option value="none">不鉴权</option>
+              </select>
+            </label>
+            <label>鉴权字段名
+              <input id="consumerHttpAuthName" placeholder="Authorization / token" />
+            </label>
+          </div>
+          <div class="grid three">
+            <label>消息列表路径<input id="consumerHttpItemsPath" value="data.list" /></label>
+            <label>弹幕内容路径<input id="consumerHttpContentPath" value="content|message" /></label>
+            <label>用户名路径<input id="consumerHttpUnamePath" value="uname|user.name" /></label>
+          </div>
+          <div class="grid three">
+            <label>游标模式
+              <select id="consumerHttpCursorMode">
+                <option value="cursor" selected>cursor</option>
+                <option value="offset">offset</option>
+                <option value="page">page</option>
+              </select>
+            </label>
+            <label>游标字段名<input id="consumerHttpCursorField" value="cursor" /></label>
+            <label>响应游标路径<input id="consumerHttpResponseCursorPath" value="data.next_cursor|nextCursor" /></label>
+          </div>
+          <div class="grid two">
+            <label>条数字段名<input id="consumerHttpLimitField" value="pageSize" /></label>
+            <label>房间字段名<input id="consumerHttpRoomIdField" value="roomId" /></label>
+          </div>
+        </div>
+        <input id="consumerConfigJson" type="hidden" value="{}" />
+      </div>
       <div class="grid two">
         <label>轮询间隔(秒)<input id="consumerPollInterval" type="number" value="3" /></label>
         <label>每批条数<input id="consumerBatchSize" type="number" value="20" /></label>
@@ -541,8 +747,9 @@
         </label>
       </div>
       <div class="grid two">
-        <label>导出字段(逗号分隔，留空=all)
-          <input id="advancedExportFields" value="all" placeholder="all 或 hourlyEvents,eventTypeTop,alertTrend,keywordStats,queueSummary" />
+        <input id="advancedExportFields" type="hidden" value="all" />
+        <label>导出内容说明
+          <input id="advancedExportHint" value="全部统计数据" readonly />
         </label>
         <label>导出数组行数上限(maxRows)
           <input id="advancedExportMaxRows" type="number" value="300" />
@@ -582,7 +789,7 @@
         <button id="btnSaveQueueSetting">保存队列设置</button>
         <button id="btnLiveAdvancedStats">读取高级统计</button>
         <button id="btnExportAdvancedStatsCsv">导出统计CSV</button>
-        <button id="btnExportAdvancedStatsJson">导出统计JSON</button>
+        <button id="btnExportAdvancedStatsJson">导出统计原始数据</button>
       </div>
       <canvas id="advancedStatsChart" width="980" height="300"></canvas>
       <canvas id="eventTopChart" width="980" height="280"></canvas>

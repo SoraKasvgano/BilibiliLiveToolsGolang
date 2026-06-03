@@ -107,9 +107,15 @@ function isUsbTemplateCommand(commandText) {
   return lower.includes("-f dshow") || lower.includes("video=\"") || lower.includes("-f v4l2") || lower.includes("/dev/video");
 }
 
-function recommendedAdvancedCommand(inputType) {
+function recommendedAdvancedCommand(inputType, mode = "auto") {
   const type = String(inputType || "").toLowerCase();
-  const commonOut = "-vcodec libx264 -pix_fmt yuv420p -r 25 -g 50 -b:v 3500k -maxrate 3500k -bufsize 7000k -preset veryfast -tune zerolatency -f flv {URL}";
+  const profile = String(mode || "auto").toLowerCase();
+  let commonOut = "-vcodec libx264 -pix_fmt yuv420p -r 25 -g 50 -b:v 3500k -maxrate 3500k -bufsize 7000k -preset veryfast -tune zerolatency -f flv {URL}";
+  if (profile === "low_latency") {
+    commonOut = "-vcodec libx264 -pix_fmt yuv420p -r 25 -g 25 -b:v 2500k -maxrate 2500k -bufsize 2500k -preset veryfast -tune zerolatency -f flv {URL}";
+  } else if (profile === "high_quality") {
+    commonOut = "-vcodec libx264 -pix_fmt yuv420p -r 30 -g 60 -b:v 6000k -maxrate 6000k -bufsize 12000k -preset medium -f flv {URL}";
+  }
   if (type === "rtsp" || type === "onvif") {
     return "ffmpeg -rtsp_transport tcp -i \"rtsp://user:pass@ip/stream\" -an " + commonOut;
   }
@@ -132,17 +138,23 @@ function suggestPushAdvancedCommand() {
   const model = asNumber("pushModel", 1);
   if (model !== 2) return;
   const inputType = asString("pushInputType");
+  const mode = asString("pushCommandMode") || "auto";
   const commandEl = document.getElementById("pushCommand");
   if (!commandEl) return;
   const current = commandEl.value || "";
   if (!current.trim()) {
-    commandEl.value = recommendedAdvancedCommand(inputType);
+    commandEl.value = recommendedAdvancedCommand(inputType, mode);
+    setInputValue("pushCommandHint", "已生成当前输入源模板");
     return;
   }
   const networkType = inputType === "rtsp" || inputType === "mjpeg" || inputType === "onvif" || inputType === "rtmp" || inputType === "gb28181";
   if (networkType && isUsbTemplateCommand(current)) {
-    commandEl.value = recommendedAdvancedCommand(inputType);
+    commandEl.value = recommendedAdvancedCommand(inputType, mode);
+    setInputValue("pushCommandHint", "已替换为当前输入源模板");
+    return;
   }
+  commandEl.value = recommendedAdvancedCommand(inputType, mode);
+  setInputValue("pushCommandHint", "模板会随输入源自动更新");
 }
 
 function normalizeBitrateKbps(value) {
@@ -318,6 +330,32 @@ const ADVANCED_EXPORT_PRESETS = {
   ops: "totals,hourlyEvents,hourlyDanmaku,eventTypeTop,keywordStats,sessionStats,queueSummary,consumerState",
   alerts: "totals,alertTrend,eventTypeTop,deadLetter",
 };
+const ADVANCED_EXPORT_HINTS = {
+  all: "全部统计数据",
+  basic: "基础概览、趋势和事件排行",
+  ops: "运维排障常用数据",
+  alerts: "告警趋势和死信任务",
+};
+const API_KEY_PRESETS = {
+  dingtalk: "钉钉机器人 access_token 或完整机器人地址",
+  telegram: "Telegram Bot Token 与 Chat ID，格式为 token|chat_id",
+  pushoo: "Pushoo 服务地址，例如 http://127.0.0.1:8084/send",
+  pushoo_token: "Pushoo 通知 Token",
+  provider_inbound_secret: "入站 Webhook 通用签名密钥",
+  provider_inbound_whitelist: "允许访问入站 Webhook 的 IP 或 CIDR 白名单",
+  telegram_inbound_secret_token: "Telegram 官方 Webhook Secret Token",
+  dingtalk_inbound_sign_secret: "钉钉官方 timestamp+sign 签名密钥",
+  dingtalk_callback_token: "钉钉回调 msg_signature Token",
+  provider_inbound_skew_sec: "入站签名允许的时间误差秒数，默认 300",
+};
+const EVENT_PRESETS = new Set([
+  "webhook.test",
+  "manual.notify",
+  "bilibili.api.alert",
+  "danmaku.rule.webhook",
+  "live.started",
+  "live.stopped",
+]);
 
 function normalizeRuntimeConfigResult(result) {
   if (!result) return result;
@@ -751,7 +789,14 @@ async function refreshBiliAlertSetting() {
     document.getElementById("biliAlertWindow").value = result.data.windowMinutes ?? 10;
     document.getElementById("biliAlertThreshold").value = result.data.threshold ?? 8;
     document.getElementById("biliAlertCooldown").value = result.data.cooldownMinutes ?? 15;
-    document.getElementById("biliAlertEventType").value = result.data.webhookEvent || "bilibili.api.alert";
+    setEventPresetFromValue(
+      "biliAlertEventPreset",
+      "biliAlertEventType",
+      "biliAlertEventCustomWrap",
+      "biliAlertEventCustom",
+      result.data.webhookEvent || "bilibili.api.alert",
+      "bilibili.api.alert"
+    );
     document.getElementById("biliAlertEnabled").value = result.data.enabled ? "true" : "false";
   }
   setBox("liveDataBox", result);
@@ -769,6 +814,8 @@ async function refreshDanmakuConsumerSetting() {
   document.getElementById("consumerPollInterval").value = Number(setting.pollIntervalSec || 3);
   document.getElementById("consumerBatchSize").value = Number(setting.batchSize || 20);
   document.getElementById("consumerRoomIdFilter").value = Number(setting.roomId || 0);
+  syncConsumerProviderPanels();
+  fillConsumerFormFromConfig();
   setBox("liveDataBox", result);
 }
 
@@ -933,6 +980,7 @@ function applyAdvancedExportPreset(preset, forceOverwrite = false) {
   const fieldsInput = document.getElementById("advancedExportFields");
   if (!fieldsInput) return;
   const next = ADVANCED_EXPORT_PRESETS[key] || "all";
+  setInputValue("advancedExportHint", ADVANCED_EXPORT_HINTS[key] || ADVANCED_EXPORT_HINTS.all);
   if (forceOverwrite || !fieldsInput.value || fieldsInput.value.trim() === "") {
     fieldsInput.value = next;
     return;
@@ -1026,6 +1074,357 @@ function setButtonEnabled(id, enabled) {
   el.disabled = !enabled;
 }
 
+function setPanelHidden(id, hidden) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle("panel-hidden", Boolean(hidden));
+}
+
+function setSelectValue(id, value, fallback) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const text = String(value ?? fallback ?? "");
+  const exists = Array.from(el.options || []).some((option) => option.value === text);
+  el.value = exists ? text : String(fallback ?? "");
+}
+
+function setInputValue(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.value = value ?? "";
+}
+
+function getSelectedValues(id) {
+  const el = document.getElementById(id);
+  if (!el) return [];
+  if (el.multiple) {
+    return Array.from(el.selectedOptions || [])
+      .map((option) => String(option.value || "").trim())
+      .filter((value) => value.length > 0);
+  }
+  const value = String(el.value || "").trim();
+  return value ? [value] : [];
+}
+
+function setMultiSelectValues(id, values) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const selected = new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean));
+  selected.forEach((value) => {
+    const exists = Array.from(el.options || []).some((option) => option.value === value);
+    if (!exists) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      el.appendChild(option);
+    }
+  });
+  Array.from(el.options || []).forEach((option) => {
+    option.selected = selected.has(option.value);
+  });
+}
+
+function optionExists(selectId, value) {
+  const el = document.getElementById(selectId);
+  if (!el) return false;
+  return Array.from(el.options || []).some((option) => option.value === value);
+}
+
+function syncEventPreset(selectId, hiddenId, customWrapId, customInputId, fallback) {
+  const preset = asString(selectId) || fallback;
+  const custom = preset === "custom";
+  setPanelHidden(customWrapId, !custom);
+  const value = custom ? asString(customInputId) || fallback : preset;
+  setInputValue(hiddenId, value || fallback);
+  return value || fallback;
+}
+
+function setEventPresetFromValue(selectId, hiddenId, customWrapId, customInputId, value, fallback) {
+  const next = String(value || fallback || "").trim() || fallback;
+  if (optionExists(selectId, next)) {
+    setSelectValue(selectId, next, fallback);
+    setInputValue(customInputId, "");
+  } else {
+    setSelectValue(selectId, "custom", fallback);
+    setInputValue(customInputId, next);
+  }
+  return syncEventPreset(selectId, hiddenId, customWrapId, customInputId, fallback);
+}
+
+function syncApiKeyPreset() {
+  const preset = asString("apiKeyPreset") || "dingtalk";
+  const custom = preset === "custom";
+  setPanelHidden("apiKeyCustomWrap", !custom);
+  const name = custom ? asString("apiKeyCustomName") : preset;
+  setInputValue("apiKeyName", name);
+  const descEl = document.getElementById("apiKeyDesc");
+  const presetDesc = API_KEY_PRESETS[preset] || "";
+  if (descEl && !custom) {
+    const current = String(descEl.value || "").trim();
+    const knownDesc = Object.values(API_KEY_PRESETS).includes(current);
+    if (!current || knownDesc) {
+      descEl.value = presetDesc;
+    }
+  }
+  return name;
+}
+
+function syncRuleActionPanels() {
+  const action = asString("ruleAction") || "ptz";
+  const isPTZ = action === "ptz";
+  setPanelHidden("ruleDirectionWrap", !isPTZ);
+  setPanelHidden("ruleSpeedWrap", !isPTZ);
+  return action;
+}
+
+function parseCSVWords(value) {
+  return String(value || "")
+    .split(/[,\n，]/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function readObjectJSON(id, fallback = {}) {
+  const raw = document.getElementById(id) ? document.getElementById(id).value : "";
+  const parsed = parseJSONInput(raw || "{}", fallback);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("页面内部参数格式异常，请重新选择表单项后再试");
+  }
+  return parsed;
+}
+
+function writePrettyJSON(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.value = JSON.stringify(value || {}, null, 2);
+}
+
+function syncBotCommandPanels() {
+  const command = asString("botCommand") || "start_live";
+  setPanelHidden("botPanelPTZ", command !== "ptz");
+  setPanelHidden("botPanelDanmaku", command !== "send_danmaku");
+  setPanelHidden("botPanelNotify", command !== "provider_notify");
+  const hints = {
+    start_live: "开始推流无需额外参数，可选择是否发送回执。",
+    stop_live: "停止推流无需额外参数，可选择是否发送回执。",
+    ptz: "云台控制会复用当前 ONVIF 配置，只需选择动作、速度和时长。",
+    send_danmaku: "填写房间号和弹幕内容；房间号为 0 时使用当前账号房间。",
+    provider_notify: "向钉钉、Telegram 或 Pushoo 发送一条通知。",
+  };
+  setInputValue("botCommandHint", hints[command] || "请选择要执行的动作。");
+}
+
+function fillBotFormFromParams() {
+  let params = {};
+  try {
+    params = readObjectJSON("botParams", {});
+  } catch {
+    return;
+  }
+  if (Object.prototype.hasOwnProperty.call(params, "notifyResult")) {
+    setSelectBool("botNotifyResult", Boolean(params.notifyResult));
+  }
+  setSelectValue("botPtzAction", params.action || params.direction || "left", "left");
+  if (params.speed !== undefined) setInputValue("botPtzSpeed", params.speed);
+  if (params.durationMs !== undefined) setInputValue("botPtzDurationMs", params.durationMs);
+  if (params.roomId !== undefined) setInputValue("botDanmakuRoomId", params.roomId);
+  if (params.message || params.content || params.text) {
+    setInputValue("botDanmakuMessage", params.message || params.content || params.text);
+  }
+  if (params.title) setInputValue("botNotifyTitle", params.title);
+  if (params.content || params.message) setInputValue("botNotifyContent", params.content || params.message);
+}
+
+function buildBotParamsFromForm() {
+  const params = { ...readObjectJSON("botParams", {}) };
+  const command = asString("botCommand") || "start_live";
+  const notifyResult = asString("botNotifyResult") === "true";
+  ["action", "direction", "speed", "durationMs", "roomId", "message", "text", "title", "content"].forEach((key) => {
+    delete params[key];
+  });
+  if (command !== "provider_notify") {
+    params.notifyResult = notifyResult;
+  }
+  if (command === "ptz") {
+    params.action = asString("botPtzAction") || "stop";
+    params.speed = Number(document.getElementById("botPtzSpeed").value || 0.3);
+    params.durationMs = asNumber("botPtzDurationMs", 700);
+  } else if (command === "send_danmaku") {
+    const message = asString("botDanmakuMessage");
+    if (!message) throw new Error("请填写要发送的弹幕内容");
+    params.roomId = asNumber("botDanmakuRoomId", 0);
+    params.message = message;
+  } else if (command === "provider_notify") {
+    const content = document.getElementById("botNotifyContent").value || "";
+    if (!content.trim()) throw new Error("请填写通知内容");
+    params.title = asString("botNotifyTitle") || "[Gover] 通知";
+    params.content = content;
+  }
+  return params;
+}
+
+function syncBotParamsJSON() {
+  const params = buildBotParamsFromForm();
+  writePrettyJSON("botParams", params);
+  return params;
+}
+
+function trySyncBotParamsJSON() {
+  try {
+    syncBotParamsJSON();
+  } catch {
+    // 自动同步只做尽力更新；真正执行时再给出明确错误。
+  }
+}
+
+function syncConsumerProviderPanels() {
+  const provider = asString("consumerProvider") || "http_polling";
+  const isBilibili = provider === "bilibili_message_stream";
+  setPanelHidden("consumerPanelBilibili", !isBilibili);
+  setPanelHidden("consumerPanelHTTP", isBilibili);
+}
+
+function defaultConsumerConfig(provider) {
+  if (provider === "bilibili_message_stream") {
+    return {
+      roomId: asNumber("consumerRoomIdFilter", 0),
+      useWbi: true,
+      useCookie: true,
+      preferWss: true,
+      webLocation: "444.8",
+      wsPath: "/sub",
+      includeCommands: ["DANMU_MSG"],
+    };
+  }
+  return {
+    method: "GET",
+    auth: { mode: "bearer" },
+    paging: {
+      cursorField: "cursor",
+      cursorIn: "query",
+      cursorMode: "cursor",
+      responseCursorPath: "data.next_cursor|nextCursor",
+      itemCursorPath: "id|cursor",
+      limitField: "pageSize",
+      limitIn: "query",
+      roomIdField: "roomId",
+      roomIdIn: "query",
+    },
+    mapping: {
+      itemsPath: "data.list",
+      roomIdPath: "room_id|roomId",
+      uidPath: "uid|user.id",
+      unamePath: "uname|user.name",
+      contentPath: "content|message",
+      rawPayloadPath: "raw",
+    },
+  };
+}
+
+function readConsumerConfigJSON() {
+  const raw = document.getElementById("consumerConfigJson").value || "{}";
+  if (!raw.trim()) return {};
+  const parsed = parseJSONInput(raw, {});
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Provider 内部配置格式异常，请重新选择协议后再保存");
+  }
+  return parsed;
+}
+
+function buildConsumerConfigFromForm() {
+  const provider = asString("consumerProvider") || "http_polling";
+  const base = { ...defaultConsumerConfig(provider), ...readConsumerConfigJSON() };
+  if (provider === "bilibili_message_stream") {
+    base.roomId = asNumber("consumerBiliRoomId", asNumber("consumerRoomIdFilter", 0));
+    base.useWbi = asString("consumerBiliUseWbi") === "true";
+    base.useCookie = asString("consumerBiliUseCookie") === "true";
+    base.preferWss = asString("consumerBiliPreferWss") === "true";
+    base.webLocation = base.webLocation || "444.8";
+    base.wsPath = base.wsPath || "/sub";
+    base.includeCommands = getSelectedValues("consumerBiliCommands");
+    if (!base.includeCommands.length) {
+      base.includeCommands = ["DANMU_MSG"];
+    }
+    return base;
+  }
+
+  base.method = asString("consumerHttpMethod") || "GET";
+  base.auth = {
+    ...(base.auth && typeof base.auth === "object" ? base.auth : {}),
+    mode: asString("consumerHttpAuthMode") || "bearer",
+  };
+  const authName = asString("consumerHttpAuthName");
+  if (authName) {
+    base.auth.name = authName;
+  }
+  base.paging = {
+    ...(base.paging && typeof base.paging === "object" ? base.paging : {}),
+    cursorField: asString("consumerHttpCursorField") || "cursor",
+    cursorIn: "query",
+    cursorMode: asString("consumerHttpCursorMode") || "cursor",
+    responseCursorPath: asString("consumerHttpResponseCursorPath") || "data.next_cursor|nextCursor",
+    limitField: asString("consumerHttpLimitField") || "pageSize",
+    limitIn: "query",
+    roomIdField: asString("consumerHttpRoomIdField") || "roomId",
+    roomIdIn: "query",
+  };
+  base.mapping = {
+    ...(base.mapping && typeof base.mapping === "object" ? base.mapping : {}),
+    itemsPath: asString("consumerHttpItemsPath") || "data.list",
+    contentPath: asString("consumerHttpContentPath") || "content|message",
+    unamePath: asString("consumerHttpUnamePath") || "uname|user.name",
+  };
+  return base;
+}
+
+function syncConsumerConfigJSON() {
+  const config = buildConsumerConfigFromForm();
+  writePrettyJSON("consumerConfigJson", config);
+  return config;
+}
+
+function trySyncConsumerConfigJSON() {
+  try {
+    syncConsumerConfigJSON();
+  } catch {
+    // 自动同步只做尽力更新；保存时再显示校验错误。
+  }
+}
+
+function fillConsumerFormFromConfig() {
+  let cfg = {};
+  try {
+    cfg = { ...defaultConsumerConfig(asString("consumerProvider")), ...readConsumerConfigJSON() };
+  } catch (error) {
+    showToast(`Provider 配置无法回填：${error.message || String(error)}`, "error");
+    return;
+  }
+  const provider = asString("consumerProvider") || "http_polling";
+  if (provider === "bilibili_message_stream") {
+    setInputValue("consumerBiliRoomId", cfg.roomId || asNumber("consumerRoomIdFilter", 0));
+    setSelectBool("consumerBiliUseWbi", cfg.useWbi !== false);
+    setSelectBool("consumerBiliUseCookie", cfg.useCookie !== false);
+    setSelectBool("consumerBiliPreferWss", cfg.preferWss !== false);
+    const commands = Array.isArray(cfg.includeCommands) ? cfg.includeCommands : parseCSVWords(cfg.includeCommands || "DANMU_MSG");
+    setMultiSelectValues("consumerBiliCommands", commands.length ? commands : ["DANMU_MSG"]);
+    return;
+  }
+  const auth = cfg.auth && typeof cfg.auth === "object" ? cfg.auth : {};
+  const paging = cfg.paging && typeof cfg.paging === "object" ? cfg.paging : {};
+  const mapping = cfg.mapping && typeof cfg.mapping === "object" ? cfg.mapping : {};
+  setSelectValue("consumerHttpMethod", String(cfg.method || "GET").toUpperCase(), "GET");
+  setSelectValue("consumerHttpAuthMode", auth.mode || "bearer", "bearer");
+  setInputValue("consumerHttpAuthName", auth.name || "");
+  setInputValue("consumerHttpItemsPath", mapping.itemsPath || "data.list");
+  setInputValue("consumerHttpContentPath", mapping.contentPath || "content|message");
+  setInputValue("consumerHttpUnamePath", mapping.unamePath || "uname|user.name");
+  setSelectValue("consumerHttpCursorMode", paging.cursorMode || "cursor", "cursor");
+  setInputValue("consumerHttpCursorField", paging.cursorField || "cursor");
+  setInputValue("consumerHttpResponseCursorPath", paging.responseCursorPath || "data.next_cursor|nextCursor");
+  setInputValue("consumerHttpLimitField", paging.limitField || "pageSize");
+  setInputValue("consumerHttpRoomIdField", paging.roomIdField || "roomId");
+}
+
 function applyFeatureFlags(data = {}) {
   const setting = data.setting || latestIntegrationFeatures || {};
   const effective = data.effective || {};
@@ -1093,6 +1492,7 @@ function buildMosaicPreview() {
 }
 
 function buildPushPayload() {
+  suggestPushAdvancedCommand();
   const mosaic = getMosaicPayload();
   return {
     model: asNumber("pushModel", 1),
@@ -1269,8 +1669,8 @@ function bindActions() {
     setBox("pushBox", result);
   });
   document.getElementById("btnFillPushCommand").onclick = withError("pushBox", async () => {
-    document.getElementById("pushCommand").value = recommendedAdvancedCommand(asString("pushInputType"));
-    setBox("pushBox", { code: 0, message: "已按当前输入类型填充推荐高级命令" });
+    suggestPushAdvancedCommand();
+    setBox("pushBox", { code: 0, message: "已按当前输入类型刷新推荐模板" });
   });
   document.getElementById("btnStartMosaicLocalPreview").onclick = withError("mosaicPreviewBox", startMosaicLocalPreview);
   document.getElementById("btnStopMosaicLocalPreview").onclick = withError("mosaicPreviewBox", async () => {
@@ -1279,6 +1679,7 @@ function bindActions() {
   });
   document.getElementById("pushInputType").addEventListener("change", suggestPushAdvancedCommand);
   document.getElementById("pushModel").addEventListener("change", suggestPushAdvancedCommand);
+  document.getElementById("pushCommandMode").addEventListener("change", suggestPushAdvancedCommand);
   document.getElementById("pushBitratePreset").addEventListener("change", syncPushBitrateCustomVisibility);
   document.getElementById("btnAddMosaicSource").onclick = withError("mosaicPreviewBox", async () => {
     const url = asString("mosaicNewSourceUrl");
@@ -1302,20 +1703,6 @@ function bindActions() {
       }
     }
     setMosaicSources(next);
-  });
-  document.getElementById("btnSyncMosaicText").onclick = withError("mosaicPreviewBox", async () => {
-    const urls = parseLines(document.getElementById("pushMultiUrls").value || "");
-    const merged = [];
-    for (const url of urls) {
-      const existing = mosaicSources.find((item) => item.url === url);
-      if (existing) {
-        merged.push(existing);
-      } else {
-        merged.push({ url, title: "", primary: merged.length === 0, sourceType: "manual", materialId: 0 });
-      }
-    }
-    setMosaicSources(merged);
-    setBox("mosaicPreviewBox", buildMosaicPreview());
   });
   document.getElementById("btnLoadMosaicMaterials").onclick = withError("mosaicPreviewBox", async () => {
     const result = await apiGet("/api/v1/materials?page=1&limit=200&fileType=1");
@@ -1398,8 +1785,12 @@ function bindActions() {
   document.getElementById("btnListMaterial").onclick = withError("materialBox", refreshMaterials);
 
   document.getElementById("btnSaveApiKey").onclick = withError("integrationBox", async () => {
+    const keyName = syncApiKeyPreset();
+    if (!keyName) {
+      throw new Error("请选择密钥用途，或填写自定义密钥名称");
+    }
     const payload = {
-      name: asString("apiKeyName"),
+      name: keyName,
       apiKey: document.getElementById("apiKeyValue").value || "",
       description: document.getElementById("apiKeyDesc").value || "",
     };
@@ -1409,11 +1800,13 @@ function bindActions() {
   });
   document.getElementById("btnListApiKey").onclick = withError("integrationBox", refreshApiKeys);
   document.getElementById("btnSaveRule").onclick = withError("integrationBox", async () => {
+    const action = syncRuleActionPanels();
+    const isPTZ = action === "ptz";
     const payload = {
       keyword: asString("ruleKeyword"),
-      action: asString("ruleAction"),
-      ptzDirection: asString("ruleDirection"),
-      ptzSpeed: asNumber("ruleSpeed", 1),
+      action,
+      ptzDirection: isPTZ ? asString("ruleDirection") : "",
+      ptzSpeed: isPTZ ? asNumber("ruleSpeed", 1) : 0,
       enabled: true,
     };
     const result = await apiPost("/api/v1/integration/danmaku-rules", payload);
@@ -1438,16 +1831,18 @@ function bindActions() {
     setBox("integrationBox", result);
   });
   document.getElementById("btnTestWebhook").onclick = withError("integrationBox", async () => {
+    const eventType = syncEventPreset("webhookEventPreset", "webhookEventType", "webhookEventCustomWrap", "webhookEventCustom", "webhook.test");
     const payload = {
       id: asNumber("webhookTestId", 0),
-      eventType: asString("webhookEventType") || "webhook.test",
+      eventType,
     };
     const result = await apiPost("/api/v1/integration/webhooks/test", payload);
     setBox("integrationBox", result);
   });
   document.getElementById("btnNotifyWebhook").onclick = withError("integrationBox", async () => {
+    const eventType = syncEventPreset("webhookEventPreset", "webhookEventType", "webhookEventCustomWrap", "webhookEventCustom", "manual.notify");
     const payload = {
-      eventType: asString("webhookEventType") || "manual.notify",
+      eventType,
       payload: {
         trigger: "manual",
         time: new Date().toISOString(),
@@ -1518,13 +1913,36 @@ function bindActions() {
     }
   });
   document.getElementById("btnBotCommand").onclick = withError("integrationBox", async () => {
+    const provider = asString("botProvider");
+    const command = asString("botCommand");
+    if (command === "provider_notify" && !provider) {
+      throw new Error("发送通道通知时，请先选择钉钉、Telegram 或 Pushoo");
+    }
+    if (asString("botNotifyResult") === "true" && !provider) {
+      throw new Error("需要发送执行回执时，请先选择通知通道");
+    }
     const payload = {
-      provider: asString("botProvider"),
-      command: asString("botCommand"),
-      params: parseJSONInput(document.getElementById("botParams").value || "{}", {}),
+      provider,
+      command,
+      params: syncBotParamsJSON(),
     };
     const result = await apiPost("/api/v1/integration/bot/command", payload);
     setBox("integrationBox", result);
+  });
+  document.getElementById("botCommand").addEventListener("change", () => {
+    syncBotCommandPanels();
+    trySyncBotParamsJSON();
+  });
+  document.getElementById("botNotifyResult").addEventListener("change", () => {
+    trySyncBotParamsJSON();
+  });
+  ["botPtzAction", "botPtzSpeed", "botPtzDurationMs", "botDanmakuRoomId", "botDanmakuMessage", "botNotifyTitle", "botNotifyContent"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener("change", () => {
+        trySyncBotParamsJSON();
+      });
+    }
   });
 
   document.getElementById("btnDispatchDanmaku").onclick = withError("liveDataBox", async () => {
@@ -1582,12 +2000,19 @@ function bindActions() {
   });
   document.getElementById("btnLoadBiliAlertSetting").onclick = withError("liveDataBox", refreshBiliAlertSetting);
   document.getElementById("btnSaveBiliAlertSetting").onclick = withError("liveDataBox", async () => {
+    const webhookEvent = syncEventPreset(
+      "biliAlertEventPreset",
+      "biliAlertEventType",
+      "biliAlertEventCustomWrap",
+      "biliAlertEventCustom",
+      "bilibili.api.alert"
+    );
     const payload = {
       enabled: asString("biliAlertEnabled") === "true",
       windowMinutes: asNumber("biliAlertWindow", 10),
       threshold: asNumber("biliAlertThreshold", 8),
       cooldownMinutes: asNumber("biliAlertCooldown", 15),
-      webhookEvent: asString("biliAlertEventType") || "bilibili.api.alert",
+      webhookEvent,
     };
     const result = await apiPost("/api/v1/integration/bilibili/alert-setting", payload);
     setBox("liveDataBox", result);
@@ -1598,13 +2023,7 @@ function bindActions() {
   });
   document.getElementById("btnLoadConsumerSetting").onclick = withError("liveDataBox", refreshDanmakuConsumerSetting);
   document.getElementById("btnSaveConsumerSetting").onclick = withError("liveDataBox", async () => {
-    const configRaw = document.getElementById("consumerConfigJson").value || "{}";
-    let configObj = {};
-    try {
-      configObj = parseJSONInput(configRaw, {});
-    } catch (error) {
-      throw new Error(`consumerConfigJson 不是合法 JSON: ${error.message || String(error)}`);
-    }
+    const configObj = syncConsumerConfigJSON();
     const payload = {
       enabled: asString("consumerEnabled") === "true",
       provider: asString("consumerProvider") || "http_polling",
@@ -1622,51 +2041,62 @@ function bindActions() {
     const provider = asString("consumerProvider");
     const configBox = document.getElementById("consumerConfigJson");
     const current = (configBox.value || "").trim();
-    if (provider === "bilibili_message_stream" && (!current || current === "{}")) {
-      configBox.value = JSON.stringify(
-        {
-          roomId: asNumber("consumerRoomIdFilter", 0),
-          useWbi: true,
-          useCookie: true,
-          preferWss: true,
-          webLocation: "444.8",
-          wsPath: "/sub",
-          includeCommands: ["DANMU_MSG"],
-        },
-        null,
-        2
-      );
-    } else if (provider === "http_polling" && (!current || current === "{}")) {
-      configBox.value = JSON.stringify(
-        {
-          method: "GET",
-          auth: { mode: "bearer" },
-          paging: {
-            cursorField: "cursor",
-            cursorIn: "query",
-            cursorMode: "cursor",
-            responseCursorPath: "data.next_cursor|nextCursor",
-            itemCursorPath: "id|cursor",
-            limitField: "pageSize",
-            roomIdField: "roomId",
-          },
-          mapping: {
-            itemsPath: "data.list",
-            roomIdPath: "room_id|roomId",
-            uidPath: "uid|user.id",
-            unamePath: "uname|user.name",
-            contentPath: "content|message",
-            rawPayloadPath: "raw",
-          },
-        },
-        null,
-        2
-      );
+    if (!current || current === "{}") {
+      writePrettyJSON("consumerConfigJson", defaultConsumerConfig(provider));
     }
+    syncConsumerProviderPanels();
+    fillConsumerFormFromConfig();
+    trySyncConsumerConfigJSON();
   };
+  [
+    "consumerBiliRoomId",
+    "consumerBiliPreferWss",
+    "consumerBiliUseCookie",
+    "consumerBiliUseWbi",
+    "consumerBiliCommands",
+    "consumerHttpMethod",
+    "consumerHttpAuthMode",
+    "consumerHttpAuthName",
+    "consumerHttpItemsPath",
+    "consumerHttpContentPath",
+    "consumerHttpUnamePath",
+    "consumerHttpCursorMode",
+    "consumerHttpCursorField",
+    "consumerHttpResponseCursorPath",
+    "consumerHttpLimitField",
+    "consumerHttpRoomIdField",
+  ].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener("change", () => {
+        trySyncConsumerConfigJSON();
+      });
+    }
+  });
+  document.getElementById("consumerRoomIdFilter").addEventListener("change", () => {
+    if (asString("consumerProvider") === "bilibili_message_stream" && asNumber("consumerBiliRoomId", 0) <= 0) {
+      setInputValue("consumerBiliRoomId", asNumber("consumerRoomIdFilter", 0));
+    }
+    trySyncConsumerConfigJSON();
+  });
   document.getElementById("advancedExportPreset").onchange = () => {
     applyAdvancedExportPreset(asString("advancedExportPreset"), true);
   };
+  document.getElementById("apiKeyPreset").addEventListener("change", syncApiKeyPreset);
+  document.getElementById("apiKeyCustomName").addEventListener("input", syncApiKeyPreset);
+  document.getElementById("ruleAction").addEventListener("change", syncRuleActionPanels);
+  document.getElementById("webhookEventPreset").addEventListener("change", () => {
+    syncEventPreset("webhookEventPreset", "webhookEventType", "webhookEventCustomWrap", "webhookEventCustom", "webhook.test");
+  });
+  document.getElementById("webhookEventCustom").addEventListener("input", () => {
+    syncEventPreset("webhookEventPreset", "webhookEventType", "webhookEventCustomWrap", "webhookEventCustom", "webhook.test");
+  });
+  document.getElementById("biliAlertEventPreset").addEventListener("change", () => {
+    syncEventPreset("biliAlertEventPreset", "biliAlertEventType", "biliAlertEventCustomWrap", "biliAlertEventCustom", "bilibili.api.alert");
+  });
+  document.getElementById("biliAlertEventCustom").addEventListener("input", () => {
+    syncEventPreset("biliAlertEventPreset", "biliAlertEventType", "biliAlertEventCustomWrap", "biliAlertEventCustom", "bilibili.api.alert");
+  });
   document.getElementById("btnConsumerStatus").onclick = withError("liveDataBox", refreshDanmakuConsumerStatus);
   document.getElementById("btnConsumerPollOnce").onclick = withError("liveDataBox", async () => {
     const result = await apiPost("/api/v1/integration/danmaku/consumer/poll-once", {});
@@ -1734,7 +2164,7 @@ function bindActions() {
   });
   document.getElementById("btnExportAdvancedStatsJson").onclick = withError("liveDataBox", async () => {
     await downloadAdvancedStats("json");
-    setBox("liveDataBox", { code: 0, message: "统计JSON已导出" });
+    setBox("liveDataBox", { code: 0, message: "统计原始数据已导出" });
   });
   document.getElementById("btnLoadIntegrationFeatures").onclick = withError("liveDataBox", refreshIntegrationFeatures);
   document.getElementById("btnSaveIntegrationFeatures").onclick = withError("liveDataBox", async () => {
@@ -1799,7 +2229,7 @@ function initNavigation() {
     recording: "section-recording",
     streaming: "section-streaming",
     account: "section-account",
-    danmaku: "section-live",
+    danmaku: "section-integration",
     mosaic: "section-streaming",
     webhook: "section-integration",
     bot: "section-integration",
@@ -1807,6 +2237,12 @@ function initNavigation() {
     live: "section-live",
     logs: "section-logs",
     maintenance: "section-maintenance",
+  };
+  const sectionAnchors = {
+    danmaku: "integration-danmaku-rules",
+    mosaic: "streaming-mosaic",
+    webhook: "integration-webhook",
+    bot: "integration-bot",
   };
 
   function resolveSectionId(sectionKey) {
@@ -1830,6 +2266,7 @@ function initNavigation() {
     const resolved = resolveSectionId(sectionKey);
     const finalSectionId = resolved || "section-config";
     const finalKey = normalizeSectionKey(sectionKey, finalSectionId);
+    const anchorId = sectionAnchors[finalKey] || "";
 
     sections.forEach((section) => {
       section.classList.remove("active");
@@ -1851,6 +2288,14 @@ function initNavigation() {
     }
 
     localStorage.setItem("activeSection", finalKey);
+
+    requestAnimationFrame(() => {
+      const anchor = anchorId ? document.getElementById(anchorId) : null;
+      const target = anchor || targetSection;
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
   }
 
   navItems.forEach((item) => {
@@ -1870,6 +2315,20 @@ async function init() {
   initNavigation();
   bindActions();
   applyAdvancedExportPreset(asString("advancedExportPreset") || "all", true);
+  suggestPushAdvancedCommand();
+  syncApiKeyPreset();
+  syncRuleActionPanels();
+  syncEventPreset("webhookEventPreset", "webhookEventType", "webhookEventCustomWrap", "webhookEventCustom", "webhook.test");
+  syncEventPreset("biliAlertEventPreset", "biliAlertEventType", "biliAlertEventCustomWrap", "biliAlertEventCustom", "bilibili.api.alert");
+  syncBotCommandPanels();
+  fillBotFormFromParams();
+  trySyncBotParamsJSON();
+  syncConsumerProviderPanels();
+  if (!(document.getElementById("consumerConfigJson").value || "").trim()) {
+    writePrettyJSON("consumerConfigJson", defaultConsumerConfig(asString("consumerProvider") || "http_polling"));
+  }
+  fillConsumerFormFromConfig();
+  trySyncConsumerConfigJSON();
   window.addEventListener("message", (event) => {
     const data = event && event.data ? event.data : {};
     if (!data || data.type !== "gover-login-success") return;

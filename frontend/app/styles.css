@@ -155,6 +155,50 @@ body {
   font-size: 20px;
 }
 
+.card h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.nav-anchor {
+  scroll-margin-top: 16px;
+}
+
+.sub-card {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #d7dfeb;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.sub-panel {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  background: #ffffff;
+}
+
+.panel-hidden {
+  display: none !important;
+}
+
+.advanced-details {
+  margin-top: 10px;
+  border: 1px dashed #b6c7e6;
+  border-radius: 9px;
+  background: #ffffff;
+  padding: 8px 10px;
+}
+
+.advanced-details summary {
+  cursor: pointer;
+  color: #1e40af;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 label {
   display: block;
   margin-bottom: 9px;
@@ -548,4 +592,3 @@ pre {
     width: 100%;
   }
 }
-
