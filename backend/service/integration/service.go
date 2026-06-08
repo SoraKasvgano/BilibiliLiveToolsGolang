@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
+	"bilibililivetools/gover/backend/config"
 	"bilibililivetools/gover/backend/service/onvif"
 	"bilibililivetools/gover/backend/store"
 )
@@ -77,6 +81,10 @@ type Service struct {
 	queueCfgMu     sync.RWMutex
 	queueCfgCache  *store.IntegrationQueueSetting
 	queueCfgExpire time.Time
+
+	cfgMu                sync.RWMutex
+	lowDiskMode          bool
+	persistedLogMaxBytes int
 }
 
 type FeatureName string
@@ -89,7 +97,7 @@ const (
 	FeatureTaskQueue       FeatureName = "task_queue"
 )
 
-func New(storeDB *store.Store, stream StreamController, bili LiveStopper, ptz PTZCommander) *Service {
+func New(storeDB *store.Store, stream StreamController, bili LiveStopper, ptz PTZCommander, cfg config.Config) *Service {
 	return &Service{
 		store:         storeDB,
 		stream:        stream,
@@ -99,7 +107,19 @@ func New(storeDB *store.Store, stream StreamController, bili LiveStopper, ptz PT
 		leaseInterval: 500 * time.Millisecond,
 		lastRateHit:   make(map[string]time.Time),
 		consumerState: DanmakuConsumerRuntime{},
+		lowDiskMode:   cfg.LowDiskMode,
+		persistedLogMaxBytes: normalizedPersistedLogLimit(
+			cfg.LowDiskMode,
+			cfg.PersistedLogMaxBytes,
+		),
 	}
+}
+
+func (s *Service) UpdateConfig(cfg config.Config) {
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	s.lowDiskMode = cfg.LowDiskMode
+	s.persistedLogMaxBytes = normalizedPersistedLogLimit(cfg.LowDiskMode, cfg.PersistedLogMaxBytes)
 }
 
 func (s *Service) Start() {
@@ -203,7 +223,7 @@ func (s *Service) SaveWebhook(ctx context.Context, item store.WebhookSetting) er
 }
 
 func (s *Service) CreateWebhookDeliveryLog(ctx context.Context, item store.WebhookDeliveryLog) error {
-	return s.store.CreateWebhookDeliveryLog(ctx, item)
+	return s.store.CreateWebhookDeliveryLog(ctx, s.limitWebhookDeliveryLog(item))
 }
 
 func (s *Service) ListWebhookDeliveryLogs(ctx context.Context, limit int, webhookID int64) ([]store.WebhookDeliveryLog, error) {
@@ -252,6 +272,61 @@ func (s *Service) SaveLiveEventJSON(ctx context.Context, eventType string, paylo
 		return err
 	}
 	return s.store.CreateLiveEvent(ctx, eventType, string(body))
+}
+
+func (s *Service) limitWebhookDeliveryLog(item store.WebhookDeliveryLog) store.WebhookDeliveryLog {
+	limit := s.persistedTextLimit()
+	item.RequestBody = limitIntegrationTextBytes(item.RequestBody, limit)
+	item.ResponseBody = limitIntegrationTextBytes(item.ResponseBody, limit)
+	item.ErrorMessage = limitIntegrationTextBytes(item.ErrorMessage, limit)
+	return item
+}
+
+func (s *Service) persistedTextLimit() int {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return normalizedPersistedLogLimit(s.lowDiskMode, s.persistedLogMaxBytes)
+}
+
+func normalizedPersistedLogLimit(lowDiskMode bool, value int) int {
+	limit := value
+	if limit <= 0 {
+		if lowDiskMode {
+			limit = 64 * 1024
+		} else {
+			limit = 8 << 20
+		}
+	}
+	if lowDiskMode && limit > 256*1024 {
+		limit = 256 * 1024
+	}
+	if limit > 8<<20 {
+		limit = 8 << 20
+	}
+	if limit < 4096 {
+		limit = 4096
+	}
+	return limit
+}
+
+func limitIntegrationTextBytes(value string, maxBytes int) string {
+	value = strings.TrimSpace(value)
+	if maxBytes <= 0 || len(value) <= maxBytes {
+		return value
+	}
+	suffix := fmt.Sprintf("\n...[truncated, original_bytes=%d, limit_bytes=%d]", len(value), maxBytes)
+	keep := maxBytes - len(suffix)
+	if keep <= 0 {
+		keep = maxBytes
+		suffix = ""
+	}
+	if keep > len(value) {
+		keep = len(value)
+	}
+	for keep > 0 && !utf8.ValidString(value[:keep]) {
+		keep--
+	}
+	return value[:keep] + suffix
 }
 
 func (s *Service) ListLiveEvents(ctx context.Context, limit int) ([]store.LiveEvent, error) {

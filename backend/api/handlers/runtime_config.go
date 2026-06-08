@@ -292,6 +292,18 @@ func decodeConfigPatch(r *http.Request, base config.Config) (config.Config, erro
 	if value, ok := getString(req, "allowOrigin"); ok {
 		base.AllowOrigin = value
 	}
+	if value, ok := getBool(req, "lowDiskMode"); ok {
+		base.LowDiskMode = value
+	}
+	if value, ok := getBool(req, "enableTelemetry"); ok {
+		base.EnableTelemetry = value
+	}
+	if value, ok := getInt(req, "telemetryIntervalSec"); ok {
+		base.TelemetryIntervalSec = value
+	}
+	if value, ok := getInt(req, "persistedLogMaxBytes"); ok {
+		base.PersistedLogMaxBytes = value
+	}
 	if value, ok := getBool(req, "enableDebugLogs"); ok {
 		base.EnableDebugLogs = value
 	}
@@ -375,6 +387,9 @@ func restartRequiredChangedFields(oldCfg config.Config, newCfg config.Config) []
 	appendIfChanged("dbPath", oldCfg.DBPath, newCfg.DBPath)
 	appendIfChanged("mediaDir", oldCfg.MediaDir, newCfg.MediaDir)
 	appendIfChanged("allowOrigin", oldCfg.AllowOrigin, newCfg.AllowOrigin)
+	if oldCfg.LowDiskMode != newCfg.LowDiskMode {
+		result = append(result, "lowDiskMode")
+	}
 	appendIfChanged("gb28181ListenIp", oldCfg.GB28181ListenIP, newCfg.GB28181ListenIP)
 	appendIfChanged("gb28181Transport", oldCfg.GB28181Transport, newCfg.GB28181Transport)
 	appendIfChanged("gb28181ServerId", oldCfg.GB28181ServerID, newCfg.GB28181ServerID)
@@ -418,6 +433,9 @@ func runtimeHotReloadNotes() []string {
 	return []string{
 		"Dynamic hot reload now applies to ffmpegPath/ffprobePath and Bilibili API credentials/metadata.",
 		"debugMode/enableDebugLogs now hot apply to data/log file logging and ffmpeg verbose mirror.",
+		"lowDiskMode disables debug file logging and telemetry immediately; SQLite journal mode follows on next process start.",
+		"enableTelemetry and telemetryIntervalSec control optional room snapshots; lowDiskMode keeps telemetry disabled.",
+		"persistedLogMaxBytes caps large persisted API/webhook response bodies.",
 		"autoStartPush controls whether startup will auto-call push start; change takes effect on next process start.",
 		"GB28181 signaling and media port pool settings can be edited here; runtime service will apply on next start/restart.",
 		"All other fields are persisted, but restart is required before they fully apply.",

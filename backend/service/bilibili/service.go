@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/skip2/go-qrcode"
 
@@ -126,6 +127,11 @@ func (s *APIService) recordAPIError(report apiErrorReport) {
 	report.Method = strings.ToUpper(strings.TrimSpace(report.Method))
 	report.Stage = strings.TrimSpace(report.Stage)
 	report.Detail = strings.TrimSpace(report.Detail)
+	originalResponseSize := len(report.ResponseBody)
+	report.RequestForm = s.limitPersistedText(report.RequestForm)
+	report.ResponseHeaders = s.limitPersistedText(report.ResponseHeaders)
+	report.ResponseBody = s.limitPersistedText(report.ResponseBody)
+	report.Detail = s.limitPersistedText(report.Detail)
 	if report.Stage == "" {
 		report.Stage = "unknown"
 	}
@@ -158,7 +164,8 @@ func (s *APIService) recordAPIError(report apiErrorReport) {
 		"attempt":      report.Attempt,
 		"retryable":    report.Retryable,
 		"errorLogId":   logID,
-		"responseSize": len(report.ResponseBody),
+		"responseSize": originalResponseSize,
+		"storedSize":   len(report.ResponseBody),
 		"time":         time.Now().Format(time.RFC3339Nano),
 	})
 	if marshalErr != nil {
@@ -168,6 +175,48 @@ func (s *APIService) recordAPIError(report apiErrorReport) {
 	if err := s.store.CreateLiveEvent(context.Background(), "bilibili.api.error", string(body)); err != nil {
 		s.logError("record api error event failed: %v", err)
 	}
+}
+
+func (s *APIService) persistedLogMaxBytes() int {
+	cfg := s.readConfig()
+	limit := cfg.PersistedLogMaxBytes
+	if limit <= 0 {
+		if cfg.LowDiskMode {
+			limit = 64 * 1024
+		} else {
+			limit = 8 << 20
+		}
+	}
+	if cfg.LowDiskMode && limit > 256*1024 {
+		limit = 256 * 1024
+	}
+	if limit > 8<<20 {
+		limit = 8 << 20
+	}
+	return limit
+}
+
+func (s *APIService) limitPersistedText(value string) string {
+	return limitTextBytes(value, s.persistedLogMaxBytes())
+}
+
+func limitTextBytes(value string, maxBytes int) string {
+	if maxBytes <= 0 || len(value) <= maxBytes {
+		return value
+	}
+	suffix := fmt.Sprintf("\n...[truncated, original_bytes=%d, limit_bytes=%d]", len(value), maxBytes)
+	keep := maxBytes - len(suffix)
+	if keep <= 0 {
+		keep = maxBytes
+		suffix = ""
+	}
+	if keep > len(value) {
+		keep = len(value)
+	}
+	for keep > 0 && !utf8.ValidString(value[:keep]) {
+		keep--
+	}
+	return value[:keep] + suffix
 }
 
 type qrState struct {
@@ -1026,10 +1075,10 @@ func requestRaw(s *APIService, ctx context.Context, method string, targetURL str
 		s.logError("raw api call failed attempt=%d method=%s url=%s stage=%s status=%d retryable=%v err=%s",
 			attempt, report.Method, report.Endpoint, report.Stage, report.HTTPStatus, report.Retryable, report.Detail)
 		if report.ResponseHeaders != "" {
-			s.logError("raw api response headers: %s", report.ResponseHeaders)
+			s.logError("raw api response headers: %s", s.limitPersistedText(report.ResponseHeaders))
 		}
 		if report.ResponseBody != "" {
-			s.logError("raw api full response body: %s", report.ResponseBody)
+			s.logError("raw api response body: %s", s.limitPersistedText(report.ResponseBody))
 		}
 		s.recordAPIError(report)
 		if attempt == 2 || !report.Retryable {
@@ -1146,10 +1195,10 @@ func requestJSON[T any](s *APIService, ctx context.Context, method string, targe
 		s.logError("api call failed attempt=%d method=%s url=%s stage=%s status=%d retryable=%v err=%s",
 			attempt, report.Method, report.Endpoint, report.Stage, report.HTTPStatus, report.Retryable, report.Detail)
 		if report.ResponseHeaders != "" {
-			s.logError("api response headers: %s", report.ResponseHeaders)
+			s.logError("api response headers: %s", s.limitPersistedText(report.ResponseHeaders))
 		}
 		if report.ResponseBody != "" {
-			s.logError("api full response body: %s", report.ResponseBody)
+			s.logError("api response body: %s", s.limitPersistedText(report.ResponseBody))
 		}
 		s.recordAPIError(report)
 

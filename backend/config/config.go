@@ -21,6 +21,10 @@ type Config struct {
 	LogBufferSize            int    `json:"logBufferSize"`
 	APIBase                  string `json:"apiBase"`
 	AllowOrigin              string `json:"allowOrigin"`
+	LowDiskMode              bool   `json:"lowDiskMode"`
+	EnableTelemetry          bool   `json:"enableTelemetry"`
+	TelemetryIntervalSec     int    `json:"telemetryIntervalSec"`
+	PersistedLogMaxBytes     int    `json:"persistedLogMaxBytes"`
 	DebugMode                bool   `json:"debugMode"`
 	EnableDebugLogs          bool   `json:"enableDebugLogs"`
 	AutoStartPush            bool   `json:"autoStartPush"`
@@ -360,6 +364,10 @@ func defaultConfig(configFile string) Config {
 		LogBufferSize:            envIntOrDefault("GOVER_LOG_BUFFER_SIZE", 300),
 		APIBase:                  envOrDefault("GOVER_API_BASE", "/api/v1"),
 		AllowOrigin:              envOrDefault("GOVER_ALLOW_ORIGIN", "*"),
+		LowDiskMode:              !strings.EqualFold(envOrDefault("GOVER_LOW_DISK_MODE", "true"), "false"),
+		EnableTelemetry:          strings.EqualFold(envOrDefault("GOVER_ENABLE_TELEMETRY", "false"), "true"),
+		TelemetryIntervalSec:     envIntOrDefault("GOVER_TELEMETRY_INTERVAL_SEC", 300),
+		PersistedLogMaxBytes:     envIntOrDefault("GOVER_PERSISTED_LOG_MAX_BYTES", 0),
 		DebugMode:                strings.EqualFold(envOrDefault("GOVER_DEBUG", "false"), "true"),
 		EnableDebugLogs:          strings.EqualFold(envOrDefault("GOVER_DEBUG", "false"), "true"),
 		AutoStartPush:            strings.EqualFold(envOrDefault("GOVER_AUTO_START_PUSH", "false"), "true"),
@@ -417,6 +425,37 @@ func normalizeConfig(cfg Config, configFile string) Config {
 	}
 	if strings.TrimSpace(cfg.AllowOrigin) == "" {
 		cfg.AllowOrigin = "*"
+	}
+	if cfg.TelemetryIntervalSec <= 0 {
+		cfg.TelemetryIntervalSec = 300
+	}
+	if cfg.TelemetryIntervalSec < 30 {
+		cfg.TelemetryIntervalSec = 30
+	}
+	if cfg.TelemetryIntervalSec > 86400 {
+		cfg.TelemetryIntervalSec = 86400
+	}
+	const maxPersistedLogBytes = 8 << 20
+	if cfg.PersistedLogMaxBytes <= 0 {
+		if cfg.LowDiskMode {
+			cfg.PersistedLogMaxBytes = 64 * 1024
+		} else {
+			cfg.PersistedLogMaxBytes = maxPersistedLogBytes
+		}
+	}
+	if cfg.PersistedLogMaxBytes < 4096 {
+		cfg.PersistedLogMaxBytes = 4096
+	}
+	if cfg.PersistedLogMaxBytes > maxPersistedLogBytes {
+		cfg.PersistedLogMaxBytes = maxPersistedLogBytes
+	}
+	if cfg.LowDiskMode {
+		cfg.EnableTelemetry = false
+		if cfg.PersistedLogMaxBytes > 256*1024 {
+			cfg.PersistedLogMaxBytes = 256 * 1024
+		}
+		cfg.EnableDebugLogs = false
+		cfg.DebugMode = false
 	}
 	if cfg.DebugMode {
 		cfg.EnableDebugLogs = true

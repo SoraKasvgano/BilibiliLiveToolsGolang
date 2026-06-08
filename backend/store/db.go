@@ -14,11 +14,20 @@ import (
 )
 
 type Store struct {
-	db     *sql.DB
-	dbPath string
+	db      *sql.DB
+	dbPath  string
+	options Options
+}
+
+type Options struct {
+	LowDiskMode bool
 }
 
 func Open(path string) (*Store, error) {
+	return OpenWithOptions(path, Options{})
+}
+
+func OpenWithOptions(path string, options Options) (*Store, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("empty database path")
 	}
@@ -42,7 +51,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 
-	store := &Store{db: db, dbPath: path}
+	store := &Store{db: db, dbPath: path, options: options}
 	if err := store.migrate(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -81,12 +90,15 @@ func (s *Store) WithTx(ctx context.Context, fn func(*sql.Tx) error) error {
 }
 
 func (s *Store) migrate(ctx context.Context) error {
+	for _, stmt := range s.pragmaStatements() {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+
 	ddlStatements := make([]string, 0, len(schemaStatements))
 	for _, stmt := range schemaStatements {
 		if isPragmaStatement(stmt) {
-			if _, err := s.db.ExecContext(ctx, stmt); err != nil {
-				return err
-			}
 			continue
 		}
 		ddlStatements = append(ddlStatements, stmt)
@@ -112,6 +124,25 @@ func (s *Store) migrate(ctx context.Context) error {
 
 func isPragmaStatement(stmt string) bool {
 	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(stmt)), "PRAGMA ")
+}
+
+func (s *Store) pragmaStatements() []string {
+	if s != nil && s.options.LowDiskMode {
+		return []string{
+			`PRAGMA journal_mode=MEMORY;`,
+			`PRAGMA synchronous=NORMAL;`,
+			`PRAGMA foreign_keys=ON;`,
+			`PRAGMA busy_timeout=5000;`,
+			`PRAGMA temp_store=MEMORY;`,
+		}
+	}
+	statements := make([]string, 0, 5)
+	for _, stmt := range schemaStatements {
+		if isPragmaStatement(stmt) {
+			statements = append(statements, stmt)
+		}
+	}
+	return statements
 }
 
 func (s *Store) ensureSchemaUpgrades(ctx context.Context) error {

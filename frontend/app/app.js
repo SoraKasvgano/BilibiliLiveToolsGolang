@@ -381,6 +381,10 @@ async function refreshRuntimeConfig() {
   document.getElementById("cfgAPIBase").value = cfg.apiBase || "/api/v1";
   document.getElementById("cfgAllowOrigin").value = cfg.allowOrigin || "*";
   document.getElementById("cfgLogBufferSize").value = Number(cfg.logBufferSize || 300);
+  document.getElementById("cfgLowDiskMode").value = cfg.lowDiskMode ? "true" : "false";
+  document.getElementById("cfgEnableTelemetry").value = cfg.enableTelemetry ? "true" : "false";
+  document.getElementById("cfgTelemetryIntervalSec").value = Number(cfg.telemetryIntervalSec || 300);
+  document.getElementById("cfgPersistedLogMaxBytes").value = Number(cfg.persistedLogMaxBytes || 65536);
   document.getElementById("cfgDataDir").value = cfg.dataDir || "";
   document.getElementById("cfgDBPath").value = cfg.dbPath || "";
   document.getElementById("cfgMediaDir").value = cfg.mediaDir || "";
@@ -402,6 +406,10 @@ function buildRuntimeConfigPayload() {
     apiBase: asString("cfgAPIBase"),
     allowOrigin: asString("cfgAllowOrigin"),
     logBufferSize: asNumber("cfgLogBufferSize", 300),
+    lowDiskMode: asString("cfgLowDiskMode") === "true",
+    enableTelemetry: asString("cfgEnableTelemetry") === "true",
+    telemetryIntervalSec: asNumber("cfgTelemetryIntervalSec", 300),
+    persistedLogMaxBytes: asNumber("cfgPersistedLogMaxBytes", 65536),
     dataDir: asString("cfgDataDir"),
     dbPath: asString("cfgDBPath"),
     mediaDir: asString("cfgMediaDir"),

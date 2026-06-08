@@ -16,18 +16,45 @@ type Service struct {
 	bili     bilibili.Service
 	streamFn func() store.PushStatus
 	interval time.Duration
+	enabled  bool
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
 }
 
-func New(storeDB *store.Store, bili bilibili.Service, streamStatusFn func() store.PushStatus) *Service {
+type Options struct {
+	Enabled  bool
+	Interval time.Duration
+}
+
+func New(storeDB *store.Store, bili bilibili.Service, streamStatusFn func() store.PushStatus, options Options) *Service {
+	interval := options.Interval
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	if interval < 30*time.Second {
+		interval = 30 * time.Second
+	}
 	return &Service{
 		store:    storeDB,
 		bili:     bili,
 		streamFn: streamStatusFn,
-		interval: 30 * time.Second,
+		interval: interval,
+		enabled:  options.Enabled,
 	}
+}
+
+func (s *Service) Update(enabled bool, interval time.Duration) {
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	if interval < 30*time.Second {
+		interval = 30 * time.Second
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.enabled = enabled
+	s.interval = interval
 }
 
 func (s *Service) Start() {
@@ -54,16 +81,29 @@ func (s *Service) Stop() {
 }
 
 func (s *Service) loop(ctx context.Context) {
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
 	for {
+		enabled, interval := s.snapshot()
+		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
-			s.sample(ctx)
+		case <-timer.C:
+			if enabled {
+				s.sample(ctx)
+			}
 		}
 	}
+}
+
+func (s *Service) snapshot() (bool, time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	interval := s.interval
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	return s.enabled, interval
 }
 
 func (s *Service) sample(ctx context.Context) {

@@ -61,7 +61,7 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 	if err := os.MkdirAll(cfg.MediaDir, 0o755); err != nil {
 		return nil, err
 	}
-	storeDB, err := store.Open(cfg.DBPath)
+	storeDB, err := store.OpenWithOptions(cfg.DBPath, store.Options{LowDiskMode: cfg.LowDiskMode})
 	if err != nil {
 		return nil, err
 	}
@@ -69,13 +69,16 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 	ffmpegSvc := ffsvc.New(cfg.FFmpegPath, cfg.FFprobePath)
 	bilibiliSvc := bilibili.New(storeDB, cfg)
 	authService := authsvc.New(storeDB, 24*time.Hour)
-	maintenanceSvc := maintenance.New(storeDB)
+	maintenanceSvc := maintenance.New(storeDB, cfg.LowDiskMode)
 	monitorSvc := monitor.New(storeDB, cfg.LogBufferSize)
 	onvifSvc := onvif.New()
 	gbSvc := gbsvc.New(storeDB, cfg)
 	streamMgr := stream.NewManager(storeDB, ffmpegSvc, bilibiliSvc, cfg.MediaDir, cfg.LogBufferSize, cfg.EnableDebugLogs || cfg.DebugMode)
-	telemetrySvc := telemetry.New(storeDB, bilibiliSvc, streamMgr.Status)
-	integrationSvc := integration.New(storeDB, streamMgr, bilibiliSvc, onvifSvc)
+	telemetrySvc := telemetry.New(storeDB, bilibiliSvc, streamMgr.Status, telemetry.Options{
+		Enabled:  cfg.EnableTelemetry && !cfg.LowDiskMode,
+		Interval: time.Duration(cfg.TelemetryIntervalSec) * time.Second,
+	})
+	integrationSvc := integration.New(storeDB, streamMgr, bilibiliSvc, onvifSvc, cfg)
 	webrtcPreviewSvc := previewsvc.New(24, cfg.EnableDebugLogs || cfg.DebugMode)
 	loggerMgr, err := logging.New(cfg)
 	if err != nil {
@@ -137,6 +140,9 @@ func New(cfgManager *config.Manager, embeddedFrontend fs.FS) (*App, error) {
 		ffmpegSvc.UpdatePaths(newCfg.FFmpegPath, newCfg.FFprobePath)
 		bilibiliSvc.UpdateConfig(newCfg)
 		gbSvc.UpdateConfig(newCfg)
+		integrationSvc.UpdateConfig(newCfg)
+		maintenanceSvc.UpdateLowDiskMode(newCfg.LowDiskMode)
+		telemetrySvc.Update(newCfg.EnableTelemetry && !newCfg.LowDiskMode, time.Duration(newCfg.TelemetryIntervalSec)*time.Second)
 		streamMgr.UpdateDebug(newCfg.EnableDebugLogs || newCfg.DebugMode)
 		webrtcPreviewSvc.UpdateDebug(newCfg.EnableDebugLogs || newCfg.DebugMode)
 		if err := loggerMgr.Update(newCfg); err != nil {

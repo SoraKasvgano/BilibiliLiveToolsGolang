@@ -338,7 +338,7 @@ func (s *Service) processWebhookTask(ctx context.Context, task store.Integration
 	} else {
 		logEntry.Success = true
 	}
-	if saveErr := s.store.CreateWebhookDeliveryLog(ctx, logEntry); saveErr != nil {
+	if saveErr := s.CreateWebhookDeliveryLog(ctx, logEntry); saveErr != nil {
 		log.Printf("[integration][warn] save webhook delivery log failed: %v", saveErr)
 	}
 	if err != nil {

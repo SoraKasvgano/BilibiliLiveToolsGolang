@@ -70,16 +70,24 @@ type Service struct {
 	currentCancel context.CancelFunc
 	history       []JobStatus
 	seq           uint64
+	lowDiskMode   bool
 }
 
-func New(storeDB *store.Store) *Service {
+func New(storeDB *store.Store, lowDiskMode bool) *Service {
 	return &Service{
-		store:      storeDB,
-		interval:   30 * time.Minute,
-		maxHistory: 40,
-		queue:      make(chan queueRequest, 16),
-		history:    make([]JobStatus, 0, 40),
+		store:       storeDB,
+		interval:    30 * time.Minute,
+		maxHistory:  40,
+		queue:       make(chan queueRequest, 16),
+		history:     make([]JobStatus, 0, 40),
+		lowDiskMode: lowDiskMode,
 	}
+}
+
+func (s *Service) UpdateLowDiskMode(enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lowDiskMode = enabled
 }
 
 func (s *Service) Start() {
@@ -256,9 +264,19 @@ func (s *Service) maybeAutoCleanup(ctx context.Context) {
 	if s.hasRunningJob() {
 		return
 	}
-	if _, err := s.QueueCleanup(setting.RetentionDays, setting.AutoVacuum, "auto"); err != nil {
+	withVacuum := setting.AutoVacuum
+	if s.isLowDiskMode() {
+		withVacuum = false
+	}
+	if _, err := s.QueueCleanup(setting.RetentionDays, withVacuum, "auto"); err != nil {
 		log.Printf("[maintenance][warn] queue auto cleanup failed: %v", err)
 	}
+}
+
+func (s *Service) isLowDiskMode() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lowDiskMode
 }
 
 func (s *Service) hasRunningJob() bool {

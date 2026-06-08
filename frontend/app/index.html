@@ -48,6 +48,24 @@
         <label>日志缓冲条数<input id="cfgLogBufferSize" type="number" value="300" /></label>
       </div>
       <div class="grid two">
+        <label>低写盘模式
+          <select id="cfgLowDiskMode">
+            <option value="true" selected>开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </label>
+        <label>直播间周期采样
+          <select id="cfgEnableTelemetry">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>采样间隔(秒)<input id="cfgTelemetryIntervalSec" type="number" value="300" /></label>
+        <label>持久化日志上限(bytes)<input id="cfgPersistedLogMaxBytes" type="number" value="65536" /></label>
+      </div>
+      <div class="grid two">
         <label>数据目录<input id="cfgDataDir" /></label>
         <label>数据库路径<input id="cfgDBPath" /></label>
       </div>
